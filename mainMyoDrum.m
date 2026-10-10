@@ -46,8 +46,9 @@ function mainMyoDrum(mode)
         case {"imu", "imu-diagnostics"}
             imuFolder = fullfile(root, 'IMU_subsystem');
             addpath(imuFolder);
+            addpath(fullfile(root, 'drumRunTests', 'diagnostics'));
             fprintf('Running the existing two-IMU diagnostic and calibration script.\n');
-            mainIMU;
+            mainIMUDiagnostics;
 
         otherwise
             error('MyoDrum:UnknownMode', ...

@@ -15,10 +15,10 @@ The restored one-IMU kick detector is preserved as the behavioural baseline in
 bottom reversal and acceleration jerk. Its return-travel state and minimum
 inter-hit interval prevent one physical stroke from generating several sounds.
 
-The integrated version now adds the missing six-pose accelerometer calibration
-around that detector. The result is saved and reused; a fresh stationary gyro
-bias (static calibration) is still measured at every startup. Calibrated
-acceleration is used by the jerk detector without changing its state machine.
+The integrated version adds six-pose accelerometer calibration and static gyro
+calibration around that detector. Both results are saved and reused unless a
+force-recalibration flag is enabled. Calibrated acceleration is used by the
+jerk detector without changing its state machine.
 
 From the repository root in MATLAB:
 
@@ -33,7 +33,7 @@ mainMyoDrum("dual-kick")
 ```
 
 This mode connects to both MPU6050s, loads or performs six-pose calibration
-for each sensor, measures a fresh static gyro bias for both sticks, estimates
+for each sensor, loads or measures static gyro bias for both sticks, estimates
 relative yaw/pitch/roll with one `imufilter` per IMU, plays the kick sample from
 either hand, and records the paired stream. Raw session data are written to
 `data/raw/session_<timestamp>/`; session metadata and gyro calibration are
@@ -50,6 +50,18 @@ mainMyoDrum("imu-diagnostics")
 ```
 
 Use `mainMyoDrum("status")` to display the shared configuration.
+
+To deliberately repeat calibration, edit `common/myoDrumConfig.m`:
+
+```matlab
+cfg.Calibration.ForceStatic = true;
+cfg.Calibration.ForceSixPose = true;
+cfg.Calibration.ForceDirection = true;
+```
+
+Return the flags to `false` after new results have been saved. With all three
+flags false, valid cached calibration is loaded and the program proceeds
+automatically to orientation warm-up and kick playback.
 
 ## Hardware assumed by the current code
 

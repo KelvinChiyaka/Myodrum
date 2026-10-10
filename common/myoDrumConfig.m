@@ -24,6 +24,7 @@ function cfg = myoDrumConfig(projectRoot)
     cfg.IMU.GyroscopeRangeDps = 250;
 
     cfg.Calibration.ForceSixPose = false;
+    cfg.Calibration.ForceStatic = false;
     cfg.Calibration.SixPoseSecondsPerPose = 2.0;
     cfg.Calibration.GyroBiasSeconds = 1.5;
     cfg.Calibration.ForceDirection = false;
