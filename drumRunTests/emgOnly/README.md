@@ -14,3 +14,17 @@ Each channel has an independent gain control. Record the gain-pot positions by
 calling `mainEMGRecord(GainNotes=[...])` directly when that information is
 available. The measured acquisition rate is saved and printed because MATLAB
 `readVoltage` performs a separate serial transaction for every channel.
+
+## High-rate mode
+
+After uploading `firmware/MyoDrumEMGStream/MyoDrumEMGStream.ino` to the Mega,
+close the Arduino Serial Monitor and run:
+
+```matlab
+mainMyoDrum("emg-stream")
+```
+
+This mode opens COM7 directly with `serialport`, receives timestamped binary
+packets at a firmware target of 250 complete channel sets per second, and logs
+sequence numbers so dropped packets are measurable. It cannot share the port
+with a MATLAB `arduino` object or another recorder.

@@ -5,6 +5,7 @@ function mainMyoDrum(mode)
 %   mainMyoDrum("kick-only")     Run the preserved working one-IMU prototype.
 %   mainMyoDrum("dual-kick")     Calibrate/log both IMUs and play kick.
 %   mainMyoDrum("emg")          Record the four EMG envelope channels.
+%   mainMyoDrum("emg-stream")   Record EMG using high-rate Mega firmware.
 %   mainMyoDrum("imu-diagnostics") Run the existing two-IMU diagnostic script.
 %   mainMyoDrum("status")        Display the active hardware and target setup.
 %
@@ -50,6 +51,12 @@ function mainMyoDrum(mode)
             addpath(emgFolder);
             mainEMGRecord;
 
+        case {"emg-stream", "fast-emg"}
+            addpath(fullfile(root, 'EMG_subsystem'));
+            emgFolder = fullfile(root, 'drumRunTests', 'emgOnly');
+            addpath(emgFolder);
+            mainEMGStreamRecord;
+
         case {"imu", "imu-diagnostics"}
             imuFolder = fullfile(root, 'IMU_subsystem');
             addpath(imuFolder);
@@ -70,6 +77,7 @@ function printHelp(cfg)
     fprintf('  mainMyoDrum("status")          Show the active configuration.\n');
     fprintf('  mainMyoDrum("kick-only")       Run the working kick detector.\n');
     fprintf('  mainMyoDrum("emg")             Record four EMG envelope channels.\n');
+    fprintf('  mainMyoDrum("emg-stream")      Use high-rate Mega EMG firmware.\n');
     fprintf('  mainMyoDrum("dual-kick")       Calibrate/log both IMUs; play kick.\n');
     fprintf('  mainMyoDrum("imu-diagnostics") Run the existing IMU checks.\n\n');
     fprintf(['Three-drum calibration and dataset collection will be added after ' ...

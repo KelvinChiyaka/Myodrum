@@ -22,6 +22,8 @@ classdef EMGSessionLogger < handle
         DurationBuffer double
         PhaseBuffer uint8
         MarkerBuffer uint8
+        SequenceBuffer uint16
+        StatusBuffer uint8
         RawLog = []
     end
 
@@ -45,11 +47,13 @@ classdef EMGSessionLogger < handle
             obj.DurationBuffer = zeros(bufferCapacity, 1);
             obj.PhaseBuffer = zeros(bufferCapacity, 1, 'uint8');
             obj.MarkerBuffer = zeros(bufferCapacity, 1, 'uint8');
+            obj.SequenceBuffer = zeros(bufferCapacity, 1, 'uint16');
+            obj.StatusBuffer = zeros(bufferCapacity, 1, 'uint8');
             save(obj.MetadataFile, 'metadata');
         end
 
         function append(obj, timeSeconds, voltages, setDurationSeconds, ...
-                phaseCode, markerCode)
+                phaseCode, markerCode, options)
             arguments
                 obj (1,1) EMGSessionLogger
                 timeSeconds (1,1) double {mustBeFinite}
@@ -57,6 +61,8 @@ classdef EMGSessionLogger < handle
                 setDurationSeconds (1,1) double {mustBeNonnegative}
                 phaseCode (1,1) uint8
                 markerCode (1,1) uint8
+                options.SequenceNumber (1,1) uint16 = uint16(0)
+                options.DeviceStatus (1,1) uint8 = uint8(0)
             end
             if obj.Closed
                 error('MyoDrum:LoggerClosed', ...
@@ -83,6 +89,8 @@ classdef EMGSessionLogger < handle
             obj.DurationBuffer(row) = setDurationSeconds;
             obj.PhaseBuffer(row) = phaseCode;
             obj.MarkerBuffer(row) = markerCode;
+            obj.SequenceBuffer(row) = options.SequenceNumber;
+            obj.StatusBuffer(row) = options.DeviceStatus;
             if obj.BufferCount == obj.BufferCapacity
                 obj.flush();
             end
@@ -109,6 +117,10 @@ classdef EMGSessionLogger < handle
                 obj.PhaseBuffer(sourceRows);
             obj.RawLog.marker(destinationRows, 1) = ...
                 obj.MarkerBuffer(sourceRows);
+            obj.RawLog.sequenceNumber(destinationRows, 1) = ...
+                obj.SequenceBuffer(sourceRows);
+            obj.RawLog.deviceStatus(destinationRows, 1) = ...
+                obj.StatusBuffer(sourceRows);
             obj.LoggedSamples = obj.LoggedSamples + obj.BufferCount;
             obj.BufferCount = 0;
         end

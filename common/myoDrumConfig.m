@@ -73,6 +73,12 @@ function cfg = myoDrumConfig(projectRoot)
     cfg.EMG.Quality.FlatRangeVolts = 0.005;
     cfg.EMG.Quality.RailVolts = 4.8;
     cfg.EMG.Quality.RestSigmaWarnVolts = 0.15;
+    cfg.EMG.StreamBaud = 250000;
+    cfg.EMG.StreamRateHz = 250;
+    cfg.EMG.StreamProtocolVersion = 1;
+    cfg.EMG.ADCReferenceVolts = 5.0;
+    cfg.EMG.ADCMaxCount = 1023;
+    cfg.EMG.StreamPlotEverySeconds = 0.10;
     cfg.EMG.HitThresholdVolts = 3.0; % Placeholder for later EMG fusion.
 
     cfg.Paths.ProjectRoot = string(projectRoot);

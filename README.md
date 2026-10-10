@@ -61,6 +61,10 @@ mainMyoDrum("emg")
 The recorder saves raw voltages and session metadata under the same timestamped
 `data/` convention as the IMU recorder and reports its measured set rate.
 
+For hit-timing data, upload the tracked Mega firmware under
+`firmware/MyoDrumEMGStream/` and use `mainMyoDrum("emg-stream")`. This replaces
+four slow `readVoltage` round trips with a continuous 250 Hz binary stream.
+
 To deliberately repeat calibration, edit `common/myoDrumConfig.m`:
 
 ```matlab

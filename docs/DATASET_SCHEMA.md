@@ -40,3 +40,9 @@ each `readVoltage` call is a serial round trip, the measured set rate and any
 undersampling warning must be interpreted with every recording. Voltage gains
 are channel- and session-specific; raw amplitudes must not be compared without
 the saved gain notes and an appropriate per-channel normalization procedure.
+
+High-rate `emg-stream` sessions use the same file and phase/marker variables.
+They additionally store `sequenceNumber` (`N`-by-1 uint16) and `deviceStatus`
+(`N`-by-1 uint8). Their `time_s` is derived from the rollover-corrected Arduino
+`micros()` clock; `metadata.streamStatistics` records dropped frames, checksum
+failures, resynchronisations and measured device rate.
