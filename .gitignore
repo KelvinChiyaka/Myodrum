@@ -32,6 +32,28 @@ codegen/
 # Cloud based storage dotfile
 .MATLABDriveTag
 
+# MyoDrum runtime calibration and experiment outputs
+*Calibration.mat
+*DirectionCalibration.mat
+twoIMUDrumMap.mat
+twoIMUDrumHits.csv
+classifierAnalysis.mat
+
+# Session recordings, derived datasets, and trained models
+/data/raw/*
+/data/processed/*
+/data/metadata/*
+/data/models/*
+!/data/raw/.gitkeep
+!/data/processed/.gitkeep
+!/data/metadata/.gitkeep
+!/data/models/.gitkeep
+
+# Local/editor and operating-system files
+.DS_Store
+Thumbs.db
+*.tmp
+
 # buildtool cache folder
 .buildtool/
 
