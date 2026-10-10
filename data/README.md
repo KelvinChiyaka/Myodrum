@@ -16,3 +16,12 @@ The active dual-kick mode creates matching timestamped session folders:
 - `metadata/sessions/session_<timestamp>/` contains session configuration and
   the complete calibration used for that recording.
 - `metadata/calibration/` contains reusable six-pose and direction calibration.
+
+Standalone EMG recording uses the same session convention:
+
+- `raw/session_<timestamp>/emgAcquisition.mat` contains `time_s`, the unfiltered
+  multichannel `emgVoltage_V`, `setDuration_s`, `phase`, and `marker`;
+- `metadata/sessions/session_<timestamp>/sessionMetadata.mat` records the pin
+  map, channel names, gain notes, measured rate, baseline, and quality flags;
+- `processed/session_<timestamp>/emgOverview.png` is a best-effort summary and
+  is never required for the raw recording to be valid.

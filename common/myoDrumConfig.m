@@ -59,10 +59,21 @@ function cfg = myoDrumConfig(projectRoot)
     cfg.Targets.CalibrationHitsPerTargetPerHand = 10;
     cfg.Targets.AudioFiles = ["kick.wav", "snare1.wav", "ridecrash.wav"];
 
-    % EMG remains optional until its acquisition and channel map are verified.
+    % EMG voltages are rectified analog envelope outputs in the 0-5 V range.
     cfg.EMG.Enabled = false;
-    cfg.EMG.AnalogPins = strings(0, 1);
-    cfg.EMG.HitThresholdVolts = 3.0;
+    cfg.EMG.AnalogPins = ["A0"; "A2"; "A3"; "A4"];
+    cfg.EMG.ChannelNames = ["LEFT_FOREARM"; "LEFT_TRICEPS"; ...
+        "RIGHT_FOREARM"; "RIGHT_TRICEPS"];
+    cfg.EMG.Hands = ["LEFT"; "LEFT"; "RIGHT"; "RIGHT"];
+    cfg.EMG.RestSeconds = 5;
+    cfg.EMG.PreflightSeconds = 2;
+    cfg.EMG.LiveWindowSeconds = 15;
+    cfg.EMG.PlotEverySets = 3;
+    cfg.EMG.MinRecommendedSetRateHz = 50;
+    cfg.EMG.Quality.FlatRangeVolts = 0.005;
+    cfg.EMG.Quality.RailVolts = 4.8;
+    cfg.EMG.Quality.RestSigmaWarnVolts = 0.15;
+    cfg.EMG.HitThresholdVolts = 3.0; % Placeholder for later EMG fusion.
 
     cfg.Paths.ProjectRoot = string(projectRoot);
     cfg.Paths.Audio = string(fullfile(projectRoot, 'audio'));

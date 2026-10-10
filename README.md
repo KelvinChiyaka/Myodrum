@@ -51,6 +51,16 @@ mainMyoDrum("imu-diagnostics")
 
 Use `mainMyoDrum("status")` to display the shared configuration.
 
+To record the four standalone EMG envelope channels without IMUs, audio, or
+hit detection, run:
+
+```matlab
+mainMyoDrum("emg")
+```
+
+The recorder saves raw voltages and session metadata under the same timestamped
+`data/` convention as the IMU recorder and reports its measured set rate.
+
 To deliberately repeat calibration, edit `common/myoDrumConfig.m`:
 
 ```matlab

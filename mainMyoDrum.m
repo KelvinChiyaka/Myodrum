@@ -4,6 +4,7 @@ function mainMyoDrum(mode)
 %   mainMyoDrum                  Show the available project modes.
 %   mainMyoDrum("kick-only")     Run the preserved working one-IMU prototype.
 %   mainMyoDrum("dual-kick")     Calibrate/log both IMUs and play kick.
+%   mainMyoDrum("emg")          Record the four EMG envelope channels.
 %   mainMyoDrum("imu-diagnostics") Run the existing two-IMU diagnostic script.
 %   mainMyoDrum("status")        Display the active hardware and target setup.
 %
@@ -43,6 +44,12 @@ function mainMyoDrum(mode)
             addpath(dualKickFolder);
             mainDualKickIMU;
 
+        case {"emg", "emg-only"}
+            addpath(fullfile(root, 'EMG_subsystem'));
+            emgFolder = fullfile(root, 'drumRunTests', 'emgOnly');
+            addpath(emgFolder);
+            mainEMGRecord;
+
         case {"imu", "imu-diagnostics"}
             imuFolder = fullfile(root, 'IMU_subsystem');
             addpath(imuFolder);
@@ -62,6 +69,7 @@ function printHelp(cfg)
     fprintf('Available commands:\n');
     fprintf('  mainMyoDrum("status")          Show the active configuration.\n');
     fprintf('  mainMyoDrum("kick-only")       Run the working kick detector.\n');
+    fprintf('  mainMyoDrum("emg")             Record four EMG envelope channels.\n');
     fprintf('  mainMyoDrum("dual-kick")       Calibrate/log both IMUs; play kick.\n');
     fprintf('  mainMyoDrum("imu-diagnostics") Run the existing IMU checks.\n\n');
     fprintf(['Three-drum calibration and dataset collection will be added after ' ...
@@ -75,6 +83,8 @@ function printStatus(cfg)
         cfg.IMU.Addresses(1), cfg.IMU.HandNames(1), ...
         cfg.IMU.Addresses(2), cfg.IMU.HandNames(2));
     fprintf('Pilot targets: %s\n', strjoin(cfg.Targets.Names, ', '));
+    fprintf('EMG pins: %s\n', strjoin( ...
+        cfg.EMG.ChannelNames + "=" + cfg.EMG.AnalogPins, ', '));
     fprintf('EMG enabled: %s\n', string(cfg.EMG.Enabled));
     fprintf('Session output root: %s\n\n', cfg.Paths.DataRoot);
 end
