@@ -3,6 +3,7 @@ function mainMyoDrum(mode)
 %
 %   mainMyoDrum                  Show the available project modes.
 %   mainMyoDrum("kick-only")     Run the preserved working one-IMU prototype.
+%   mainMyoDrum("dual-kick")     Calibrate/log both IMUs and play kick.
 %   mainMyoDrum("imu-diagnostics") Run the existing two-IMU diagnostic script.
 %   mainMyoDrum("status")        Display the active hardware and target setup.
 %
@@ -33,6 +34,15 @@ function mainMyoDrum(mode)
                 'thresholds and duplicate-hit safeguard are unchanged.\n']);
             mainKickIMUFast;
 
+        case {"dual-kick", "two-imu-kick"}
+            addpath(fullfile(root, 'IMU_subsystem'));
+            addpath(fullfile(root, 'calibration'));
+            addpath(fullfile(root, 'classifiers', 'ruleBased'));
+            addpath(fullfile(root, 'audio'));
+            dualKickFolder = fullfile(root, 'drumRunTests', 'kickOnly');
+            addpath(dualKickFolder);
+            mainDualKickIMU;
+
         case {"imu", "imu-diagnostics"}
             imuFolder = fullfile(root, 'IMU_subsystem');
             addpath(imuFolder);
@@ -51,6 +61,7 @@ function printHelp(cfg)
     fprintf('Available commands:\n');
     fprintf('  mainMyoDrum("status")          Show the active configuration.\n');
     fprintf('  mainMyoDrum("kick-only")       Run the working kick detector.\n');
+    fprintf('  mainMyoDrum("dual-kick")       Calibrate/log both IMUs; play kick.\n');
     fprintf('  mainMyoDrum("imu-diagnostics") Run the existing IMU checks.\n\n');
     fprintf(['Three-drum calibration and dataset collection will be added after ' ...
         'the two-IMU health test is confirmed on the hardware.\n']);

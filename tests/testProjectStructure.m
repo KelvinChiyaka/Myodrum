@@ -55,3 +55,53 @@ function testAccelerometerCalibrationMath(testCase)
     verifyEqual(testCase, corrected, [1, 0, 0; -1, 1, 0], ...
         'AbsTol', 1e-12);
 end
+
+function testDualKickPipelineExists(testCase)
+    root = testCase.TestData.Root;
+    requiredFiles = { ...
+        fullfile('drumRunTests', 'kickOnly', 'mainDualKickIMU.m'), ...
+        fullfile('calibration', 'calibrateDualIMUSession.m'), ...
+        fullfile('IMU_subsystem', 'setupMPU6050Pair.m'), ...
+        fullfile('IMU_subsystem', 'readMPU6050Sample.m'), ...
+        fullfile('classifiers', 'ruleBased', 'initializeKickDetector.m'), ...
+        fullfile('classifiers', 'ruleBased', 'updateKickDetector.m'), ...
+        fullfile('audio', 'createKickPlayerBank.m')};
+    for fileIndex = 1:numel(requiredFiles)
+        verifyTrue(testCase, isfile(fullfile(root, requiredFiles{fileIndex})), ...
+            sprintf('Missing dual-kick component: %s', requiredFiles{fileIndex}));
+    end
+end
+
+function testBothIMUsAreConfigured(testCase)
+    cfg = myoDrumConfig(testCase.TestData.Root);
+    verifyEqual(testCase, cfg.IMU.Addresses, ["0x68", "0x69"]);
+    verifyEqual(testCase, numel(cfg.IMU.HandNames), 2);
+end
+
+function testSessionLoggerWritesSchema(testCase)
+    temporaryFolder = string(tempname);
+    mkdir(temporaryFolder);
+    cleanup = onCleanup(@()rmdir(temporaryFolder, 's'));
+    rawFile = fullfile(temporaryFolder, 'raw.mat');
+    metadataFile = fullfile(temporaryFolder, 'metadata.mat');
+    metadata.sessionId = "test_session";
+    metadata.completedNormally = false;
+    logger = DualIMUSessionLogger(rawFile, metadataFile, metadata, 2);
+    for sampleIndex = 1:3
+        pairVector = sampleIndex * ones(1, 3, 2);
+        logger.append(sampleIndex / 10, pairVector, pairVector, ...
+            pairVector, sampleIndex * ones(1, 2), pairVector, ...
+            logical([sampleIndex == 2, sampleIndex == 3]));
+    end
+    logger.CompletedNormally = true;
+    logger.close();
+
+    recorded = load(rawFile);
+    verifyEqual(testCase, size(recorded.accelRaw_g), [3, 3, 2]);
+    verifyEqual(testCase, recorded.kickHit, ...
+        logical([0 0; 1 0; 0 1]));
+    session = load(metadataFile, 'metadata');
+    verifyTrue(testCase, session.metadata.completedNormally);
+    verifyEqual(testCase, session.metadata.loggedSamples, 3);
+    verifyEqual(testCase, session.metadata.kickCount, [1, 1]);
+end

@@ -61,3 +61,16 @@ classification. It is evidence and a starting point, not the active model.
 
 The active pilot therefore uses three targets and will first collect a small
 session-aware dataset before scaling up.
+
+## Current integrated path
+
+`mainMyoDrum("dual-kick")` coordinates these layers:
+
+1. `IMU_subsystem/` connects and reads both sensors.
+2. `calibration/calibrateDualIMUSession.m` loads/runs six-pose calibration,
+   measures session gyro bias, and establishes each downstroke direction.
+3. Two Sensor Fusion Toolbox `imufilter` objects estimate orientation.
+4. `classifiers/ruleBased/` runs one independent robust kick detector per hand.
+5. `audio/` supplies a preloaded polyphonic kick player bank.
+6. `common/DualIMUSessionLogger.m` writes paired samples and event flags into
+   the correct session-specific data folders.

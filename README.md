@@ -26,7 +26,24 @@ From the repository root in MATLAB:
 mainMyoDrum("kick-only")
 ```
 
-The existing dual-IMU diagnostic and calibration program remains available:
+For the current two-hand workflow, use:
+
+```matlab
+mainMyoDrum("dual-kick")
+```
+
+This mode connects to both MPU6050s, loads or performs six-pose calibration
+for each sensor, measures a fresh static gyro bias for both sticks, estimates
+relative yaw/pitch/roll with one `imufilter` per IMU, plays the kick sample from
+either hand, and records the paired stream. Raw session data are written to
+`data/raw/session_<timestamp>/`; session metadata and gyro calibration are
+written to `data/metadata/sessions/session_<timestamp>/`. Persistent six-pose
+and downstroke-direction calibrations live in `data/metadata/calibration/`.
+
+The MPU6050 has no magnetometer. `imufilter` therefore gives useful
+gravity-referenced roll and pitch, but yaw is only relative and will drift.
+
+The legacy dual-IMU diagnostic and calibration program remains available:
 
 ```matlab
 mainMyoDrum("imu-diagnostics")
