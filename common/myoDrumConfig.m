@@ -38,9 +38,10 @@ function cfg = myoDrumConfig(projectRoot)
     cfg.Kick.DecelerationDropRadPerSec = 0.30;
     cfg.Kick.AccelStepThresholdMps2 = 2.5;
     cfg.Kick.MissedHitResetRadPerSec = -0.60;
-    cfg.Kick.MinReturnTravelRad = deg2rad(8);
-    cfg.Kick.MinInterHitSeconds = 0.08;
-    cfg.Kick.FastRearmSeconds = 0.11;
+    % Per-hand anti-double-trigger gate. Alternating and simultaneous hits
+    % remain independent because each stick owns a separate detector.
+    cfg.Kick.MinReturnTravelRad = deg2rad(15);
+    cfg.Kick.MinInterHitSeconds = 0.28;
     cfg.Kick.AudioVoices = 8;
 
     cfg.Orientation.ReferenceFrame = "ENU";

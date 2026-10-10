@@ -30,7 +30,7 @@ function testTwoHandsCanTriggerInSameCycle(testCase)
     verifyTrue(testCase, all(hit));
 end
 
-function testFastRearmRecognizesNextStroke(testCase)
+function testReturnTravelRearmsNextStroke(testCase)
     cfg = myoDrumConfig(testCase.TestData.Root);
     direction = struct('axis', 3, 'sign', 1);
     detector = initializeKickDetector;
@@ -41,11 +41,36 @@ function testFastRearmRecognizesNextStroke(testCase)
     [detector, firstHit] = updateKickDetector(detector, [4 0 9.81], ...
         [0 0 0.2], direction, 0.10, 20, cfg.Kick);
     [detector, ~] = updateKickDetector(detector, [0 0 9.81], ...
-        [0 0 0.8], direction, 0.22, 20, cfg.Kick);
+        [0 0 -2.0], direction, 0.20, 20, cfg.Kick);
+    [detector, ~] = updateKickDetector(detector, [0 0 9.81], ...
+        [0 0 -1.5], direction, 0.28, 20, cfg.Kick);
+    [detector, ~] = updateKickDetector(detector, [0 0 9.81], ...
+        [0 0 0.8], direction, 0.40, 20, cfg.Kick);
     [~, secondHit] = updateKickDetector(detector, [4 0 9.81], ...
-        [0 0 0.2], direction, 0.27, 20, cfg.Kick);
+        [0 0 0.2], direction, 0.45, 20, cfg.Kick);
     verifyTrue(testCase, firstHit);
     verifyTrue(testCase, secondHit);
+end
+
+
+function testReboundInsideGuardDoesNotRetrigger(testCase)
+    cfg = myoDrumConfig(testCase.TestData.Root);
+    direction = struct('axis', 3, 'sign', 1);
+    detector = initializeKickDetector;
+    [detector, ~] = updateKickDetector(detector, [0 0 9.81], ...
+        [0 0 0], direction, 0.00, 20, cfg.Kick);
+    [detector, ~] = updateKickDetector(detector, [0 0 9.81], ...
+        [0 0 0.8], direction, 0.05, 20, cfg.Kick);
+    [detector, firstHit] = updateKickDetector(detector, [4 0 9.81], ...
+        [0 0 0.2], direction, 0.10, 20, cfg.Kick);
+    [detector, reboundHit1] = updateKickDetector(detector, [0 0 9.81], ...
+        [0 0 -3.0], direction, 0.20, 20, cfg.Kick);
+    [detector, reboundHit2] = updateKickDetector(detector, [0 0 9.81], ...
+        [0 0 0.9], direction, 0.25, 20, cfg.Kick);
+    [~, reboundHit3] = updateKickDetector(detector, [4 0 9.81], ...
+        [0 0 0.1], direction, 0.30, 20, cfg.Kick);
+    verifyTrue(testCase, firstHit);
+    verifyFalse(testCase, reboundHit1 || reboundHit2 || reboundHit3);
 end
 
 function testRequiredFoldersExist(testCase)

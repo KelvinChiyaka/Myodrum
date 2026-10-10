@@ -55,9 +55,7 @@ function [detector, hit, diagnostics] = updateKickDetector( ...
             kickCfg.MinReturnTravelRad;
         enoughTime = (timeNow - detector.lastHitTime) >= ...
             kickCfg.MinInterHitSeconds;
-        fastRearm = enoughTime && ...
-            (timeNow - detector.lastHitTime) >= kickCfg.FastRearmSeconds;
-        if (enoughTravel && enoughTime) || fastRearm
+        if enoughTravel && enoughTime
             if signedRate >= kickCfg.DownstrokeArmRadPerSec
                 % A quick player may already be in the next downstroke by
                 % the time MATLAB obtains the next frame. Arm it directly.
