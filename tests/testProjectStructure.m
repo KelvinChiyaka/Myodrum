@@ -7,7 +7,45 @@ function setupOnce(testCase)
     root = fileparts(fileparts(mfilename('fullpath')));
     addpath(fullfile(root, 'common'));
     addpath(fullfile(root, 'IMU_subsystem'));
+    addpath(fullfile(root, 'classifiers', 'ruleBased'));
     testCase.TestData.Root = root;
+end
+
+function testTwoHandsCanTriggerInSameCycle(testCase)
+    cfg = myoDrumConfig(testCase.TestData.Root);
+    direction = struct('axis', 3, 'sign', 1);
+    detectors = [initializeKickDetector, initializeKickDetector];
+    hit = false(1, 2);
+    for sensorIndex = 1:2
+        [detectors(sensorIndex), ~] = updateKickDetector( ...
+            detectors(sensorIndex), [0 0 9.81], [0 0 0], ...
+            direction, 0.00, 20, cfg.Kick);
+        [detectors(sensorIndex), ~] = updateKickDetector( ...
+            detectors(sensorIndex), [0 0 9.81], [0 0 0.8], ...
+            direction, 0.05, 20, cfg.Kick);
+        [detectors(sensorIndex), hit(sensorIndex)] = updateKickDetector( ...
+            detectors(sensorIndex), [4 0 9.81], [0 0 0.2], ...
+            direction, 0.10, 20, cfg.Kick);
+    end
+    verifyTrue(testCase, all(hit));
+end
+
+function testFastRearmRecognizesNextStroke(testCase)
+    cfg = myoDrumConfig(testCase.TestData.Root);
+    direction = struct('axis', 3, 'sign', 1);
+    detector = initializeKickDetector;
+    [detector, ~] = updateKickDetector(detector, [0 0 9.81], ...
+        [0 0 0], direction, 0.00, 20, cfg.Kick);
+    [detector, ~] = updateKickDetector(detector, [0 0 9.81], ...
+        [0 0 0.8], direction, 0.05, 20, cfg.Kick);
+    [detector, firstHit] = updateKickDetector(detector, [4 0 9.81], ...
+        [0 0 0.2], direction, 0.10, 20, cfg.Kick);
+    [detector, ~] = updateKickDetector(detector, [0 0 9.81], ...
+        [0 0 0.8], direction, 0.22, 20, cfg.Kick);
+    [~, secondHit] = updateKickDetector(detector, [4 0 9.81], ...
+        [0 0 0.2], direction, 0.27, 20, cfg.Kick);
+    verifyTrue(testCase, firstHit);
+    verifyTrue(testCase, secondHit);
 end
 
 function testRequiredFoldersExist(testCase)

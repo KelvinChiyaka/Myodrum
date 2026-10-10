@@ -48,7 +48,8 @@ function mainDualKickIMU
     board = arduino(cfg.Hardware.COMPort, cfg.Hardware.Board, ...
         'Libraries', 'I2C');
     sensors = setupMPU6050Pair( ...
-        board, cfg.IMU.Addresses, cfg.IMU.SensorOutputRateHz);
+        board, cfg.IMU.Addresses, cfg.IMU.SensorOutputRateHz, ...
+        cfg.IMU.DLPFConfig);
     sampleRateHz = measureDualIMUReadRate(sensors, 25);
     metadata.measuredSampleRateHz = sampleRateHz;
     save(metadataFile, 'metadata');
@@ -56,22 +57,33 @@ function mainDualKickIMU
     calibration = calibrateDualIMUSession( ...
         sensors, sampleRateHz, cfg, metadataFolder);
 
+    orientationStride = cfg.Orientation.UpdateEverySamples;
+    orientationRateHz = sampleRateHz / orientationStride;
     filters = cell(1, 2);
     for sensorIndex = 1:2
         filters{sensorIndex} = imufilter( ...
-            'SampleRate', sampleRateHz, ...
+            'SampleRate', orientationRateHz, ...
             'ReferenceFrame', char(cfg.Orientation.ReferenceFrame));
     end
 
     fprintf('\nORIENTATION FILTER WARM-UP\n');
     fprintf(['Hold both sticks still in a comfortable neutral playing pose. ' ...
         'Warming up for %.1f seconds...\n'], cfg.Orientation.WarmupSeconds);
-    warmupCount = max(20, round( ...
-        sampleRateHz * cfg.Orientation.WarmupSeconds));
+    warmupFilterUpdates = max(8, round( ...
+        orientationRateHz * cfg.Orientation.WarmupSeconds));
+    warmupCount = warmupFilterUpdates * orientationStride;
     neutralYprDeg = zeros(2, 3);
     for sampleIndex = 1:warmupCount
+        warmupSamples = cell(1, 2);
         for sensorIndex = 1:2
-            sample = readMPU6050Sample(sensors(sensorIndex));
+            warmupSamples{sensorIndex} = ...
+                readMPU6050Sample(sensors(sensorIndex));
+        end
+        if mod(sampleIndex - 1, orientationStride) ~= 0
+            continue;
+        end
+        for sensorIndex = 1:2
+            sample = warmupSamples{sensorIndex};
             accelG = applyMPU6050AccelCalibration( ...
                 sample.accelG, calibration.accel{sensorIndex});
             accelMps2 = accelG * 9.80665;
@@ -103,6 +115,7 @@ function mainDualKickIMU
     fprintf('Press Q in the plot window or close it to stop and save.\n\n');
     sessionTimer = tic;
     sampleNumber = 0;
+    lastRelativeYprDeg = zeros(2, 3);
 
     while isgraphics(fig) && getappdata(fig, 'MyoDrumRunning')
         sampleNumber = sampleNumber + 1;
@@ -113,35 +126,28 @@ function mainDualKickIMU
         cycleTemperature = zeros(1, 2);
         cycleYpr = zeros(1, 3, 2);
         cycleHit = false(1, 2);
+        cycleDiagnostics = cell(1, 2);
+        samples = cell(1, 2);
+
+        % Acquire both hands back-to-back before doing any filtering,
+        % plotting, logging, console output, or audio work. This minimizes
+        % left/right sampling skew and makes simultaneous hits observable.
+        for sensorIndex = 1:2
+            samples{sensorIndex} = readMPU6050Sample(sensors(sensorIndex));
+        end
 
         for sensorIndex = 1:2
-            sample = readMPU6050Sample(sensors(sensorIndex));
+            sample = samples{sensorIndex};
             calibratedAccelG = applyMPU6050AccelCalibration( ...
                 sample.accelG, calibration.accel{sensorIndex});
             accelMps2 = calibratedAccelG * 9.80665;
             correctedGyroRad = deg2rad(sample.gyroDps - ...
                 calibration.gyroBiasDps(sensorIndex, :));
 
-            orientation = filters{sensorIndex}( ...
-                accelMps2, correctedGyroRad);
-            absoluteYprDeg = eulerd(orientation, 'ZYX', 'frame');
-            relativeYprDeg = wrapDegrees( ...
-                absoluteYprDeg - neutralYprDeg(sensorIndex, :));
-
             [detectors(sensorIndex), hit, diagnostics] = ...
                 updateKickDetector(detectors(sensorIndex), accelMps2, ...
                 correctedGyroRad, calibration.directions(sensorIndex), ...
                 timeNow, sampleRateHz, cfg.Kick);
-
-            if hit
-                play(players{nextVoice});
-                nextVoice = mod(nextVoice, numel(players)) + 1;
-                hitCount(sensorIndex) = hitCount(sensorIndex) + 1;
-                fprintf('%s KICK %d | rate=%+.2f rad/s | jerk=%.2f m/s^2\n', ...
-                    cfg.IMU.HandNames(sensorIndex), hitCount(sensorIndex), ...
-                    diagnostics.signedRateRadPerSec, ...
-                    diagnostics.accelStepMps2);
-            end
 
             cycleRawAccel(1, :, sensorIndex) = sample.accelG;
             cycleCalibratedAccel(1, :, sensorIndex) = ...
@@ -149,20 +155,50 @@ function mainDualKickIMU
             cycleCorrectedGyro(1, :, sensorIndex) = ...
                 correctedGyroRad;
             cycleTemperature(1, sensorIndex) = sample.temperatureC;
-            cycleYpr(1, :, sensorIndex) = relativeYprDeg;
             cycleHit(1, sensorIndex) = hit;
+            cycleDiagnostics{sensorIndex} = diagnostics;
+        end
 
-            if mod(sampleNumber, cfg.Orientation.PlotEverySamples) == 0
-                for angleIndex = 1:3
-                    addpoints(angleLines{sensorIndex}(angleIndex), ...
-                        timeNow, relativeYprDeg(angleIndex));
-                end
+        % Decide both hit flags first, then start a separate preloaded voice
+        % for each. If both flags are true, both sounds are launched in this
+        % same cycle rather than one hand blocking the other.
+        for sensorIndex = find(cycleHit)
+            play(players{nextVoice});
+            nextVoice = mod(nextVoice, numel(players)) + 1;
+            hitCount(sensorIndex) = hitCount(sensorIndex) + 1;
+            diagnostics = cycleDiagnostics{sensorIndex};
+            fprintf('%s KICK %d | rate=%+.2f rad/s | jerk=%.2f m/s^2\n', ...
+                cfg.IMU.HandNames(sensorIndex), hitCount(sensorIndex), ...
+                diagnostics.signedRateRadPerSec, diagnostics.accelStepMps2);
+        end
+
+        % Orientation is useful for mapping and logging, but it is not
+        % required to recognize a kick. Run it after audio triggering and
+        % at a lower rate so it cannot delay a detected strike.
+        if mod(sampleNumber - 1, orientationStride) == 0
+            for sensorIndex = 1:2
+                accelMps2 = cycleCalibratedAccel(1, :, sensorIndex) * 9.80665;
+                correctedGyroRad = cycleCorrectedGyro(1, :, sensorIndex);
+                orientation = filters{sensorIndex}(accelMps2, correctedGyroRad);
+                absoluteYprDeg = eulerd(orientation, 'ZYX', 'frame');
+                lastRelativeYprDeg(sensorIndex, :) = wrapDegrees( ...
+                    absoluteYprDeg - neutralYprDeg(sensorIndex, :));
             end
+        end
+        for sensorIndex = 1:2
+            cycleYpr(1, :, sensorIndex) = ...
+                lastRelativeYprDeg(sensorIndex, :);
         end
 
         logger.append(timeNow, cycleRawAccel, cycleCalibratedAccel, ...
             cycleCorrectedGyro, cycleTemperature, cycleYpr, cycleHit);
         if mod(sampleNumber, cfg.Orientation.PlotEverySamples) == 0
+            for sensorIndex = 1:2
+                for angleIndex = 1:3
+                    addpoints(angleLines{sensorIndex}(angleIndex), ...
+                        timeNow, lastRelativeYprDeg(sensorIndex, angleIndex));
+                end
+            end
             drawnow limitrate;
         end
     end

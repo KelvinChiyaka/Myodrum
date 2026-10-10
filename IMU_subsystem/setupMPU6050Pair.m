@@ -1,4 +1,4 @@
-function sensors = setupMPU6050Pair(board, addresses, outputRateHz)
+function sensors = setupMPU6050Pair(board, addresses, outputRateHz, dlpfConfig)
 % SETUPMPU6050PAIR Connect and configure two MPU6050 devices.
 %
 % addresses is normally ["0x68", "0x69"]. Both devices share SDA/SCL;
@@ -8,6 +8,7 @@ function sensors = setupMPU6050Pair(board, addresses, outputRateHz)
         board (1,1)
         addresses (1,:) string
         outputRateHz (1,1) double {mustBeFinite, mustBePositive}
+        dlpfConfig (1,1) double {mustBeInteger, mustBeInRange(dlpfConfig, 0, 6)} = 2
     end
 
     if numel(addresses) ~= 2 || numel(unique(addresses)) ~= 2
@@ -36,7 +37,7 @@ function sensors = setupMPU6050Pair(board, addresses, outputRateHz)
         sensors(sensorIndex).address = address;
         sensors(sensorIndex).initRegs = [ ...
             hex2dec('6B'), 1; ... % clock source; wake device
-            hex2dec('1A'), 4; ... % DLPF configuration
+            hex2dec('1A'), dlpfConfig; ... % DLPF configuration
             hex2dec('19'), divider; ...
             hex2dec('1B'), 0; ... % gyro +/-250 degrees/s
             hex2dec('1C'), 0];    % accelerometer +/-2 g

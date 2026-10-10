@@ -25,17 +25,25 @@ function [detector, hit, diagnostics] = updateKickDetector( ...
         if signedRate >= kickCfg.DownstrokeArmRadPerSec
             detector.mode = 2;
             detector.recentAccelSteps(:) = 0;
+            detector.peakDownstrokeRate = signedRate;
+            detector.armedAtTime = timeNow;
         end
     elseif detector.mode == 2
+        detector.peakDownstrokeRate = max( ...
+            detector.peakDownstrokeRate, signedRate);
         reversed = signedRate <= kickCfg.BottomReversalRadPerSec;
+        decelerated = (detector.peakDownstrokeRate - signedRate) >= ...
+            kickCfg.DecelerationDropRadPerSec;
         jerked = max(detector.recentAccelSteps) >= ...
             kickCfg.AccelStepThresholdMps2;
         enoughTime = (timeNow - detector.lastHitTime) >= ...
             kickCfg.MinInterHitSeconds;
-        if reversed && jerked && enoughTime
+        if (reversed || decelerated) && jerked && enoughTime
             hit = true;
             detector.lastHitTime = timeNow;
-            detector.returnTravelRad = 0;
+            % Include the reversal sample itself. At the measured dual-I2C
+            % rate it may be the only negative-rate sample before rebound.
+            detector.returnTravelRad = max(0, -signedRate) * samplePeriod;
             detector.mode = 3;
         elseif signedRate <= kickCfg.MissedHitResetRadPerSec
             detector.mode = 1;
@@ -47,11 +55,23 @@ function [detector, hit, diagnostics] = updateKickDetector( ...
             kickCfg.MinReturnTravelRad;
         enoughTime = (timeNow - detector.lastHitTime) >= ...
             kickCfg.MinInterHitSeconds;
-        if enoughTravel && enoughTime
-            detector.mode = 1;
+        fastRearm = enoughTime && ...
+            (timeNow - detector.lastHitTime) >= kickCfg.FastRearmSeconds;
+        if (enoughTravel && enoughTime) || fastRearm
+            if signedRate >= kickCfg.DownstrokeArmRadPerSec
+                % A quick player may already be in the next downstroke by
+                % the time MATLAB obtains the next frame. Arm it directly.
+                detector.mode = 2;
+                detector.recentAccelSteps(:) = 0;
+                detector.peakDownstrokeRate = signedRate;
+                detector.armedAtTime = timeNow;
+            else
+                detector.mode = 1;
+            end
         end
     end
 
+    detector.previousSignedRate = signedRate;
     diagnostics.signedRateRadPerSec = signedRate;
     diagnostics.accelStepMps2 = max(detector.recentAccelSteps);
     diagnostics.state = detector.mode;

@@ -7,4 +7,7 @@ function detector = initializeKickDetector
     detector.returnTravelRad = 0;
     detector.lastHitTime = -inf;
     detector.lastSampleTime = NaN;
+    detector.previousSignedRate = 0;
+    detector.peakDownstrokeRate = 0;
+    detector.armedAtTime = -inf;
 end

@@ -19,7 +19,10 @@ function cfg = myoDrumConfig(projectRoot)
 
     cfg.IMU.Addresses = ["0x68", "0x69"];
     cfg.IMU.HandNames = ["LEFT", "RIGHT"];
-    cfg.IMU.SensorOutputRateHz = 50;
+    % A faster internal update and lower-latency DLPF ensure each slow
+    % MATLAB/I2C transaction receives the freshest available motion frame.
+    cfg.IMU.SensorOutputRateHz = 100;
+    cfg.IMU.DLPFConfig = 2;
     cfg.IMU.AccelerometerRangeG = 2;
     cfg.IMU.GyroscopeRangeDps = 250;
 
@@ -32,18 +35,23 @@ function cfg = myoDrumConfig(projectRoot)
 
     cfg.Kick.DownstrokeArmRadPerSec = 0.50;
     cfg.Kick.BottomReversalRadPerSec = -0.10;
+    cfg.Kick.DecelerationDropRadPerSec = 0.30;
     cfg.Kick.AccelStepThresholdMps2 = 2.5;
     cfg.Kick.MissedHitResetRadPerSec = -0.60;
     cfg.Kick.MinReturnTravelRad = deg2rad(8);
     cfg.Kick.MinInterHitSeconds = 0.08;
+    cfg.Kick.FastRearmSeconds = 0.11;
     cfg.Kick.AudioVoices = 8;
 
     cfg.Orientation.ReferenceFrame = "ENU";
     cfg.Orientation.WarmupSeconds = 2.0;
-    cfg.Orientation.PlotEverySamples = 5;
+    % Hit detection runs every acquisition. Orientation and drawing are
+    % deliberately decimated because they are not in the audio trigger path.
+    cfg.Orientation.UpdateEverySamples = 4;
+    cfg.Orientation.PlotEverySamples = 12;
     cfg.Orientation.MaximumPlotPoints = 1200;
 
-    cfg.Logging.BufferSamples = 100;
+    cfg.Logging.BufferSamples = 500;
 
     % The first controlled pilot deliberately uses three separable targets.
     cfg.Targets.Names = ["KICK", "SNARE", "CRASH"];
