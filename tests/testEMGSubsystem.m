@@ -24,6 +24,17 @@ function testConfigPinMapAndShapes(testCase)
     verifyFalse(testCase, any(ismember(["A1"; "A5"], cfg.EMG.AnalogPins)));
 end
 
+function testCoupledChannelDetection(testCase)
+    waveform = sin((1:200)' / 9);
+    values = [waveform, mod((1:200)', 17) / 17, ...
+        cos((1:200)' / 7), waveform];
+    result = findCoupledEMGChannels(values, ...
+        ["LEFT_FOREARM"; "LEFT_TRICEPS"; ...
+         "RIGHT_FOREARM"; "RIGHT_TRICEPS"]);
+    verifyEqual(testCase, result.pairs, [1, 4]);
+    verifyGreaterThan(testCase, result.correlations, 0.99);
+end
+
 function testLoggerSchemaAcrossBufferBoundary(testCase)
     folder = string(tempname);
     mkdir(folder);

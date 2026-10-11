@@ -163,8 +163,33 @@ function testSessionLoggerWritesSchema(testCase)
     verifyEqual(testCase, size(recorded.accelRaw_g), [3, 3, 2]);
     verifyEqual(testCase, recorded.kickHit, ...
         logical([0 0; 1 0; 0 1]));
+    verifyEqual(testCase, recorded.frameValid, true(3, 2));
+    verifyTrue(testCase, all(isnan(recorded.loopDuration_s)));
+    verifyEqual(testCase, recorded.targetIndex, zeros(3, 2, 'uint8'));
     session = load(metadataFile, 'metadata');
     verifyTrue(testCase, session.metadata.completedNormally);
     verifyEqual(testCase, session.metadata.loggedSamples, 3);
     verifyEqual(testCase, session.metadata.kickCount, [1, 1]);
+end
+
+function testSessionLoggerWritesSynchronizedEMG(testCase)
+    temporaryFolder = string(tempname);
+    mkdir(temporaryFolder);
+    cleanup = onCleanup(@()rmdir(temporaryFolder, 's'));
+    rawFile = fullfile(temporaryFolder, 'raw.mat');
+    metadataFile = fullfile(temporaryFolder, 'metadata.mat');
+    metadata.sessionId = "combined_test";
+    logger = DualIMUSessionLogger(rawFile, metadataFile, metadata, 2, 4);
+    pairVector = ones(1, 3, 2);
+    logger.append(0.1, pairVector, pairVector, pairVector, ones(1, 2), ...
+        pairVector, false(1, 2), true(1, 2), 0.1, uint8([2, 0]), ...
+        [0.01, 0.03], [1, 2, 3, 4], [0.04, 0.08]);
+    logger.close();
+
+    recorded = load(rawFile);
+    verifyEqual(testCase, recorded.emgVoltage_V, [1, 2, 3, 4]);
+    verifyEqual(testCase, recorded.imuTimestamp_s, 0.02, 'AbsTol', eps);
+    verifyEqual(testCase, recorded.emgTimestamp_s, 0.06, 'AbsTol', eps);
+    verifyEqual(testCase, recorded.imuReadStart_s, 0.01);
+    verifyEqual(testCase, recorded.emgReadEnd_s, 0.08);
 end

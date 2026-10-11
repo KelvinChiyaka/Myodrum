@@ -19,7 +19,55 @@ models are saved separately. CSV may be used for trial metadata or feature
 tables, while synchronized multichannel time series should use a documented MAT
 structure rather than ambiguous flattened columns.
 
+The current paired live stream additionally records:
+
+- `frameValid` (`N`-by-2 logical): whether each hand supplied a fresh frame;
+- `loopDuration_s` (`N`-by-1 seconds): complete acquisition-loop timing;
+- `targetIndex` (`N`-by-2 uint8): zero for no accepted target, otherwise an
+  index into `metadata.config.Targets.Names`;
+- `kickHit` (`N`-by-2 logical): the historical field name for the per-hand
+  strike-candidate flag; in three-drum mode it can accompany any target.
+
 ## Standalone EMG envelope sessions
+
+## Combined IMU and EMG sessions
+
+Run `mainMyoDrum("imu-emg")` to create a fresh labelled three-drum
+calibration followed by live play. The raw session folder contains:
+
+- `imuEmgGestureCalibration.mat`: continuous two-IMU and four-channel EMG
+  samples labelled by `handIndex`, `targetIndex`, and calibration `attempt`;
+- `dualKickIMU.mat`: live two-IMU data, detected hits and target indices, plus
+  `emgVoltage_V` in `cfg.EMG.ChannelNames` order.
+
+Both files store `imuReadStart_s`, `imuReadEnd_s`, `imuTimestamp_s`,
+`emgReadStart_s`, `emgReadEnd_s`, and `emgTimestamp_s`. Midpoint timestamps
+are derived from each host acquisition window. They share one MATLAB
+`tic`/`toc` clock but are not hardware-clock timestamps. Four EMG channels are
+read sequentially, so the window endpoints expose their timing uncertainty.
+
+This compatibility mode uses the MATLAB Arduino Support Package. It cannot
+run at the standalone 250 Hz EMG firmware rate because both methods require
+exclusive ownership of the same COM port.
+
+## Real-time synchronized fusion sessions
+
+`mainMyoDrum("imu-emg-stream")` writes `imuEmgStream.mat`. Every row is one
+200 Hz firmware frame and contains `time_s`, `sequenceNumber`, `deviceStatus`,
+`frameValid`, both IMUs, `emgVoltage_V`, independently normalized
+`emgNormalized`, `imuCandidateHit`, `emgConfirmedHit`,
+`emgConfirmationScore`, and `targetIndex`. All values in a row share the same
+Arduino `micros()` timestamp. `emgConfirmationCalibration.mat` stores the rest
+and active samples plus the per-channel normalization profile.
+
+The continuous file also includes `candidateTargetIndex`,
+`fusionAcceptedHit`, `fusionRejectedHit`, `fusionPendingActive`, and
+`fusionDecisionCode`. The `fusionEvents` table contains one row per IMU
+candidate with candidate and decision timestamps, hand, proposed orientation
+label, initial and peak normalized EMG scores, acceptance, and decision reason.
+Code meanings are stored in session metadata. A recoverable checkpoint is
+written every `cfg.Logging.StreamCheckpointSeconds`; only the final save marks
+the session `completedNormally=true`.
 
 `mainMyoDrum("emg")` writes `emgAcquisition.mat` beside the IMU session folders.
 Its variables are:

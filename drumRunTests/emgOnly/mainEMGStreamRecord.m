@@ -111,6 +111,7 @@ function mainEMGStreamRecord(options)
     saved = load(rawFile, 'time_s', 'emgVoltage_V');
     statistics = reader.getStatistics();
     final = summarizeSession(saved, restBaseline, statistics, cfg);
+    warnCoupling(final.coupling, names, pins);
     logger.updateMetadata(final);
     logger.CompletedNormally = true;
     clear cleanup;
@@ -198,6 +199,20 @@ function printPreview(values, names, pins, qualityCfg)
         warning('MyoDrum:RailedEMG', ...
             'At least one EMG channel reached the configured voltage rail.');
     end
+    coupling = findCoupledEMGChannels(values, names);
+    warnCoupling(coupling, names, pins);
+end
+
+function warnCoupling(coupling, names, pins)
+    for pairIndex = 1:size(coupling.pairs, 1)
+        pair = coupling.pairs(pairIndex, :);
+        warning('MyoDrum:CoupledEMGChannels', ...
+            ['%s (%s) and %s (%s) are %.1f%% correlated. Check for a ' ...
+             'shared signal wire or ground/reference problem. If wiring is ' ...
+             'correct, upload the latest settled-ADC firmware.'], ...
+            names(pair(1)), pins(pair(1)), names(pair(2)), pins(pair(2)), ...
+            100 * coupling.correlations(pairIndex));
+    end
 end
 
 function final = summarizeSession(saved, baseline, statistics, cfg)
@@ -224,6 +239,8 @@ function final = summarizeSession(saved, baseline, statistics, cfg)
     final.restBaseline = baseline;
     final.quality = quality;
     final.streamStatistics = statistics;
+    final.coupling = findCoupledEMGChannels( ...
+        saved.emgVoltage_V, cfg.EMG.ChannelNames);
     final.rateWarning = string(warningText);
 end
 

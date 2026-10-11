@@ -16,7 +16,8 @@ The earlier five-drum mapping experiment is preserved under
 `calibrateDualIMUSession.m` is the active two-hand calibration coordinator:
 
 - each IMU has its own saved six-pose accelerometer offset/scale result;
-- both IMUs receive a fresh static gyro-bias measurement every session;
+- both IMUs receive a fresh static gyro-bias measurement every session by
+  default; an age-limited cached policy is available as an explicit opt-in;
 - each stick has a saved downstroke-axis/sign calibration;
 - reusable mounting calibration is stored under `data/metadata/calibration/`;
 - session-specific gyro results are stored with that session's metadata.

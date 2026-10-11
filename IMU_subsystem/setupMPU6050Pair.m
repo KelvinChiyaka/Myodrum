@@ -1,15 +1,26 @@
-function sensors = setupMPU6050Pair(board, addresses, outputRateHz, dlpfConfig)
+function sensors = setupMPU6050Pair(board, addresses, outputRateHz, ...
+        dlpfConfig, gyroRangeDps)
 % SETUPMPU6050PAIR Connect and configure two MPU6050 devices.
 %
 % addresses is normally ["0x68", "0x69"]. Both devices share SDA/SCL;
 % the second sensor must have AD0 tied high to select address 0x69.
+%
+% gyroRangeDps selects the gyroscope full scale (250, 500, 1000 or 2000).
+% The matching LSB-per-dps scale is stored in each sensor so every frame is
+% decoded with the range that was actually programmed. A fast drum stroke can
+% exceed 250 dps, which clips the reading and loses rotation.
 
     arguments
         board (1,1)
         addresses (1,:) string
         outputRateHz (1,1) double {mustBeFinite, mustBePositive}
         dlpfConfig (1,1) double {mustBeInteger, mustBeInRange(dlpfConfig, 0, 6)} = 2
+        gyroRangeDps (1,1) double {mustBeMember(gyroRangeDps, ...
+            [250, 500, 1000, 2000])} = 250
     end
+    gyroRangeCode = find([250, 500, 1000, 2000] == gyroRangeDps) - 1;
+    gyroLsbPerDps = [131, 65.5, 32.8, 16.4];
+    gyroLsbPerDps = gyroLsbPerDps(gyroRangeCode + 1);
 
     if numel(addresses) ~= 2 || numel(unique(addresses)) ~= 2
         error('MyoDrum:InvalidIMUAddresses', ...
@@ -22,7 +33,8 @@ function sensors = setupMPU6050Pair(board, addresses, outputRateHz, dlpfConfig)
             'Sensor output rate must produce an integer divider from 1 kHz.');
     end
 
-    template = struct('dev', [], 'address', "", 'initRegs', zeros(0, 2));
+    template = struct('dev', [], 'address', "", 'initRegs', zeros(0, 2), ...
+        'gyroRangeDps', 250, 'gyroLsbPerDps', 131);
     sensors = repmat(template, 1, 2);
     for sensorIndex = 1:2
         address = addresses(sensorIndex);
@@ -35,11 +47,13 @@ function sensors = setupMPU6050Pair(board, addresses, outputRateHz, dlpfConfig)
 
         sensors(sensorIndex).dev = dev;
         sensors(sensorIndex).address = address;
+        sensors(sensorIndex).gyroRangeDps = gyroRangeDps;
+        sensors(sensorIndex).gyroLsbPerDps = gyroLsbPerDps;
         sensors(sensorIndex).initRegs = [ ...
             hex2dec('6B'), 1; ... % clock source; wake device
             hex2dec('1A'), dlpfConfig; ... % DLPF configuration
             hex2dec('19'), divider; ...
-            hex2dec('1B'), 0; ... % gyro +/-250 degrees/s
+            hex2dec('1B'), 8 * gyroRangeCode; ... % gyro FS_SEL bits 4:3
             hex2dec('1C'), 0];    % accelerometer +/-2 g
         configureSensor(sensors(sensorIndex));
         fprintf('MPU6050 %d connected at %s.\n', sensorIndex, address);

@@ -4,6 +4,9 @@ function mainMyoDrum(mode)
 %   mainMyoDrum                  Show the available project modes.
 %   mainMyoDrum("kick-only")     Run the preserved working one-IMU prototype.
 %   mainMyoDrum("dual-kick")     Calibrate/log both IMUs and play kick.
+%   mainMyoDrum("three-drum")   Calibrate and play kick/snare/crash regions.
+%   mainMyoDrum("imu-emg")      Record synchronized two-IMU + four-EMG data.
+%   mainMyoDrum("imu-emg-stream") Run 200 Hz synchronized fusion firmware.
 %   mainMyoDrum("emg")          Record the four EMG envelope channels.
 %   mainMyoDrum("emg-stream")   Record EMG using high-rate Mega firmware.
 %   mainMyoDrum("imu-diagnostics") Run the existing two-IMU diagnostic script.
@@ -45,6 +48,34 @@ function mainMyoDrum(mode)
             addpath(dualKickFolder);
             mainDualKickIMU;
 
+        case {"three-drum", "three-drums"}
+            addpath(fullfile(root, 'IMU_subsystem'));
+            addpath(fullfile(root, 'calibration'));
+            addpath(fullfile(root, 'classifiers', 'ruleBased'));
+            addpath(fullfile(root, 'audio'));
+            dualKickFolder = fullfile(root, 'drumRunTests', 'kickOnly');
+            addpath(dualKickFolder);
+            mainDualKickIMU("three-drum");
+
+        case {"imu-emg", "three-drum-emg", "combined"}
+            addpath(fullfile(root, 'IMU_subsystem'));
+            addpath(fullfile(root, 'EMG_subsystem'));
+            addpath(fullfile(root, 'calibration'));
+            addpath(fullfile(root, 'classifiers', 'ruleBased'));
+            addpath(fullfile(root, 'audio'));
+            dualKickFolder = fullfile(root, 'drumRunTests', 'kickOnly');
+            addpath(dualKickFolder);
+            mainDualKickIMU("three-drum-emg");
+
+        case {"imu-emg-stream", "combined-stream", "fusion"}
+            addpath(fullfile(root, 'IMU_subsystem'));
+            addpath(fullfile(root, 'EMG_subsystem'));
+            addpath(fullfile(root, 'classifiers', 'ruleBased'));
+            addpath(fullfile(root, 'audio'));
+            combinedFolder = fullfile(root, 'drumRunTests', 'combined');
+            addpath(combinedFolder);
+            mainIMUEMGStream;
+
         case {"emg", "emg-only"}
             addpath(fullfile(root, 'EMG_subsystem'));
             emgFolder = fullfile(root, 'drumRunTests', 'emgOnly');
@@ -76,12 +107,15 @@ function printHelp(cfg)
     fprintf('Available commands:\n');
     fprintf('  mainMyoDrum("status")          Show the active configuration.\n');
     fprintf('  mainMyoDrum("kick-only")       Run the working kick detector.\n');
+    fprintf('  mainMyoDrum("dual-kick")       Calibrate/log both IMUs; play kick.\n');
+    fprintf('  mainMyoDrum("three-drum")      Calibrate/play kick, snare, crash.\n');
+    fprintf('  mainMyoDrum("imu-emg")         Record labelled IMU + EMG gestures.\n');
+    fprintf('  mainMyoDrum("imu-emg-stream")  Run synchronized 200 Hz fusion.\n');
     fprintf('  mainMyoDrum("emg")             Record four EMG envelope channels.\n');
     fprintf('  mainMyoDrum("emg-stream")      Use high-rate Mega EMG firmware.\n');
-    fprintf('  mainMyoDrum("dual-kick")       Calibrate/log both IMUs; play kick.\n');
     fprintf('  mainMyoDrum("imu-diagnostics") Run the existing IMU checks.\n\n');
-    fprintf(['Three-drum calibration and dataset collection will be added after ' ...
-        'the two-IMU health test is confirmed on the hardware.\n']);
+    fprintf(['Three-drum mode calibrates independent pitch/roll regions for ' ...
+        'both sticks; either hand can play every configured sound.\n']);
 end
 
 function printStatus(cfg)
@@ -91,8 +125,8 @@ function printStatus(cfg)
         cfg.IMU.Addresses(1), cfg.IMU.HandNames(1), ...
         cfg.IMU.Addresses(2), cfg.IMU.HandNames(2));
     fprintf('Pilot targets: %s\n', strjoin(cfg.Targets.Names, ', '));
+    fprintf('EMG enabled: %s\n', string(cfg.EMG.Enabled));
     fprintf('EMG pins: %s\n', strjoin( ...
         cfg.EMG.ChannelNames + "=" + cfg.EMG.AnalogPins, ', '));
-    fprintf('EMG enabled: %s\n', string(cfg.EMG.Enabled));
     fprintf('Session output root: %s\n\n', cfg.Paths.DataRoot);
 end

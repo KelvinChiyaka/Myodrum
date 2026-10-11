@@ -39,6 +39,16 @@ void writeUint32LE(uint8_t* destination, uint32_t value) {
   destination[3] = static_cast<uint8_t>((value >> 24) & 0xFF);
 }
 
+uint16_t readSettledAnalog(uint8_t pin) {
+  // The envelope boards can present more than the AVR ADC's recommended
+  // source impedance. After changing channels, the sample/hold capacitor can
+  // retain part of the preceding channel. Discard one conversion so the
+  // transmitted conversion is acquired after the multiplexer has settled.
+  analogRead(pin);
+  delayMicroseconds(10);
+  return analogRead(pin);
+}
+
 void sendFrame(uint32_t timestampUs) {
   uint8_t frame[FRAME_LENGTH];
   frame[0] = 0xAA;
@@ -47,7 +57,8 @@ void sendFrame(uint32_t timestampUs) {
   writeUint16LE(&frame[3], sequenceNumber++);
   writeUint32LE(&frame[5], timestampUs);
   for (uint8_t channel = 0; channel < CHANNEL_COUNT; ++channel) {
-    writeUint16LE(&frame[9 + 2 * channel], analogRead(CHANNEL_PINS[channel]));
+    writeUint16LE(&frame[9 + 2 * channel],
+                  readSettledAnalog(CHANNEL_PINS[channel]));
   }
   frame[17] = 0;  // Status flags reserved for future firmware revisions.
   frame[18] = crc8(&frame[2], 16);
@@ -72,6 +83,8 @@ void processCommands() {
 void setup() {
   Serial.begin(SERIAL_BAUD);
   analogReference(DEFAULT);
+  // Disable digital input buffers on the four analogue-only signal pins.
+  DIDR0 |= _BV(ADC0D) | _BV(ADC2D) | _BV(ADC3D) | _BV(ADC4D);
   for (uint8_t channel = 0; channel < CHANNEL_COUNT; ++channel) {
     pinMode(CHANNEL_PINS[channel], INPUT);
   }

@@ -29,6 +29,14 @@ function [detector, hit, diagnostics] = updateKickDetector( ...
             detector.armedAtTime = timeNow;
         end
     elseif detector.mode == 2
+        if (timeNow - detector.armedAtTime) > kickCfg.ArmTimeoutSeconds
+            detector.mode = 1;
+            detector.peakDownstrokeRate = 0;
+            diagnostics.signedRateRadPerSec = signedRate;
+            diagnostics.accelStepMps2 = max(detector.recentAccelSteps);
+            diagnostics.state = detector.mode;
+            return;
+        end
         detector.peakDownstrokeRate = max( ...
             detector.peakDownstrokeRate, signedRate);
         reversed = signedRate <= kickCfg.BottomReversalRadPerSec;
