@@ -1,132 +1,170 @@
-function mainMyoDrum(mode)
-% MAINMYODRUM Top-level entry point for the MyoDrum MATLAB project.
-%
-%   mainMyoDrum                  Show the available project modes.
-%   mainMyoDrum("kick-only")     Run the preserved working one-IMU prototype.
-%   mainMyoDrum("dual-kick")     Calibrate/log both IMUs and play kick.
-%   mainMyoDrum("three-drum")   Calibrate and play kick/snare/crash regions.
-%   mainMyoDrum("imu-emg")      Record synchronized two-IMU + four-EMG data.
-%   mainMyoDrum("imu-emg-stream") Run 200 Hz synchronized fusion firmware.
-%   mainMyoDrum("emg")          Record the four EMG envelope channels.
-%   mainMyoDrum("emg-stream")   Record EMG using high-rate Mega firmware.
-%   mainMyoDrum("imu-diagnostics") Run the existing two-IMU diagnostic script.
-%   mainMyoDrum("status")        Display the active hardware and target setup.
-%
-% The calibration, acquisition, classification, and audio algorithms live in
-% their subsystem folders. This function intentionally remains a small session
-% controller instead of duplicating those implementations.
+function mainMyoDrum(mode, classifier)
 
     arguments
-        mode (1,1) string = "help"
+        mode (1,1) string = "menu"
+        classifier (1,1) string = "prompt"
     end
 
     root = fileparts(mfilename('fullpath'));
     addpath(fullfile(root, 'common'));
     cfg = myoDrumConfig(root);
+    mode = canonicalMode(mode);
 
-    switch lower(strtrim(mode))
-        case {"help", "menu"}
-            printHelp(cfg);
+    if mode == "menu"
+        mode = promptForInterface(cfg);
+        if mode == "exit"
+            fprintf('MyoDrum closed.\n');
+            return;
+        end
+    end
 
-        case {"status", "project-status"}
-            printStatus(cfg);
+    if mode == "classifier"
+        printClassifierStatus;
+        return;
+    end
+    if mode == "emg-only"
+        runEMGOnly(root);
+        return;
+    end
+    if classifier == "prompt"
+        classifier = promptForClassifier;
+    end
+    classifier = canonicalClassifier(classifier);
+    requireImplementedCombination(mode, classifier);
 
-        case {"kick", "kick-only"}
-            kickFolder = fullfile(root, 'drumRunTests', 'kickOnly');
-            addpath(fullfile(root, 'IMU_subsystem'));
-            addpath(kickFolder);
-            fprintf(['Running the preserved kick-only baseline. Its tested ' ...
-                'thresholds and duplicate-hit safeguard are unchanged.\n']);
-            mainKickIMUFast;
-
-        case {"dual-kick", "two-imu-kick"}
-            addpath(fullfile(root, 'IMU_subsystem'));
-            addpath(fullfile(root, 'calibration'));
-            addpath(fullfile(root, 'classifiers', 'ruleBased'));
-            addpath(fullfile(root, 'audio'));
-            dualKickFolder = fullfile(root, 'drumRunTests', 'kickOnly');
-            addpath(dualKickFolder);
-            mainDualKickIMU;
-
-        case {"three-drum", "three-drums"}
-            addpath(fullfile(root, 'IMU_subsystem'));
-            addpath(fullfile(root, 'calibration'));
-            addpath(fullfile(root, 'classifiers', 'ruleBased'));
-            addpath(fullfile(root, 'audio'));
-            dualKickFolder = fullfile(root, 'drumRunTests', 'kickOnly');
-            addpath(dualKickFolder);
-            mainDualKickIMU("three-drum");
-
-        case {"imu-emg", "three-drum-emg", "combined"}
-            addpath(fullfile(root, 'IMU_subsystem'));
-            addpath(fullfile(root, 'EMG_subsystem'));
-            addpath(fullfile(root, 'calibration'));
-            addpath(fullfile(root, 'classifiers', 'ruleBased'));
-            addpath(fullfile(root, 'audio'));
-            dualKickFolder = fullfile(root, 'drumRunTests', 'kickOnly');
-            addpath(dualKickFolder);
-            mainDualKickIMU("three-drum-emg");
-
-        case {"imu-emg-stream", "combined-stream", "fusion"}
-            addpath(fullfile(root, 'IMU_subsystem'));
-            addpath(fullfile(root, 'EMG_subsystem'));
-            addpath(fullfile(root, 'classifiers', 'ruleBased'));
-            addpath(fullfile(root, 'audio'));
-            combinedFolder = fullfile(root, 'drumRunTests', 'combined');
-            addpath(combinedFolder);
-            mainIMUEMGStream;
-
-        case {"emg", "emg-only"}
-            addpath(fullfile(root, 'EMG_subsystem'));
-            emgFolder = fullfile(root, 'drumRunTests', 'emgOnly');
-            addpath(emgFolder);
-            mainEMGRecord;
-
-        case {"emg-stream", "fast-emg"}
-            addpath(fullfile(root, 'EMG_subsystem'));
-            emgFolder = fullfile(root, 'drumRunTests', 'emgOnly');
-            addpath(emgFolder);
-            mainEMGStreamRecord;
-
-        case {"imu", "imu-diagnostics"}
-            imuFolder = fullfile(root, 'IMU_subsystem');
-            addpath(imuFolder);
-            addpath(fullfile(root, 'drumRunTests', 'diagnostics'));
-            fprintf('Running the existing two-IMU diagnostic and calibration script.\n');
-            mainIMUDiagnostics;
-
+    switch mode
+        case "imu-only"
+            runIMUOnly(root);
+        case "imu-emg-4"
+            runFourChannelFusion(root);
+        case "imu-emg-6"
+            error('MyoDrum:NotImplemented', [ ...
+                'Six-channel IMU + EMG is reserved for the next hardware ' ...
+                'stage. Its pins, packet protocol and electrode map have ' ...
+                'not yet been defined.']);
         otherwise
-            error('MyoDrum:UnknownMode', ...
-                'Unknown mode "%s". Run mainMyoDrum("help") for valid modes.', mode);
+            error('MyoDrum:UnknownMode', 'Unknown interface "%s".', mode);
     end
 end
 
-function printHelp(cfg)
+function mode = promptForInterface(cfg)
     fprintf('\n%s\n', cfg.Project.DisplayName);
-    fprintf('Current stage: repository foundation and three-drum pilot.\n\n');
-    fprintf('Available commands:\n');
-    fprintf('  mainMyoDrum("status")          Show the active configuration.\n');
-    fprintf('  mainMyoDrum("kick-only")       Run the working kick detector.\n');
-    fprintf('  mainMyoDrum("dual-kick")       Calibrate/log both IMUs; play kick.\n');
-    fprintf('  mainMyoDrum("three-drum")      Calibrate/play kick, snare, crash.\n');
-    fprintf('  mainMyoDrum("imu-emg")         Record labelled IMU + EMG gestures.\n');
-    fprintf('  mainMyoDrum("imu-emg-stream")  Run synchronized 200 Hz fusion.\n');
-    fprintf('  mainMyoDrum("emg")             Record four EMG envelope channels.\n');
-    fprintf('  mainMyoDrum("emg-stream")      Use high-rate Mega EMG firmware.\n');
-    fprintf('  mainMyoDrum("imu-diagnostics") Run the existing IMU checks.\n\n');
-    fprintf(['Three-drum mode calibrates independent pitch/roll regions for ' ...
-        'both sticks; either hand can play every configured sound.\n']);
+    fprintf('Select the sensor interface:\n');
+    fprintf('  1. IMU only\n');
+    fprintf('  2. EMG only (four channels)\n');
+    fprintf('  3. IMU + EMG (four channels)\n');
+    fprintf('  4. IMU + EMG (six channels) [future]\n');
+    fprintf('  5. Classifier status\n');
+    fprintf('  0. Exit\n');
+    choice = input('Selection: ');
+    modes = ["exit", "imu-only", "emg-only", "imu-emg-4", ...
+        "imu-emg-6", "classifier"];
+    if ~isscalar(choice) || ~isnumeric(choice) || ~isfinite(choice) || ...
+            choice ~= fix(choice) || choice < 0 || choice > 5
+        error('MyoDrum:InvalidMenuSelection', ...
+            'Enter one integer from 0 to 5.');
+    end
+    mode = modes(choice + 1);
 end
 
-function printStatus(cfg)
-    fprintf('\n%s configuration\n', cfg.Project.DisplayName);
-    fprintf('Arduino: %s on %s\n', cfg.Hardware.Board, cfg.Hardware.COMPort);
-    fprintf('IMU addresses: %s (%s), %s (%s)\n', ...
-        cfg.IMU.Addresses(1), cfg.IMU.HandNames(1), ...
-        cfg.IMU.Addresses(2), cfg.IMU.HandNames(2));
-    fprintf('Pilot targets: %s\n', strjoin(cfg.Targets.Names, ', '));
-    fprintf('EMG enabled: %s\n', string(cfg.EMG.Enabled));
-    fprintf('EMG pins: %s\n', strjoin( ...
-        cfg.EMG.ChannelNames + "=" + cfg.EMG.AnalogPins, ', '));
-    fprintf('Session output root: %s\n\n', cfg.Paths.DataRoot);
+function classifier = promptForClassifier
+    fprintf('\nSelect the classifier:\n');
+    fprintf('  1. Rule based [available]\n');
+    fprintf('  2. Machine learning [collect/train separately]\n');
+    fprintf('  3. Hybrid rule based + machine learning [future]\n');
+    choice = input('Selection: ');
+    classifiers = ["rule-based", "machine-learning", "hybrid"];
+    if ~isscalar(choice) || ~isnumeric(choice) || ~isfinite(choice) || ...
+            choice ~= fix(choice) || choice < 1 || choice > 3
+        error('MyoDrum:InvalidClassifierSelection', ...
+            'Enter one integer from 1 to 3.');
+    end
+    classifier = classifiers(choice);
+end
+
+function mode = canonicalMode(mode)
+    mode = lower(strtrim(mode));
+    switch mode
+        case {"menu", "help"}
+            mode = "menu";
+        case {"imu", "imu-only"}
+            mode = "imu-only";
+        case {"emg", "emg-only"}
+            mode = "emg-only";
+        case {"imu-emg", "imu-emg-4", "imu-emg-stream"}
+            mode = "imu-emg-4";
+        case "imu-emg-6"
+            mode = "imu-emg-6";
+        case {"classifier", "classifiers"}
+            mode = "classifier";
+        otherwise
+            error('MyoDrum:UnknownMode', ...
+                ['Unknown interface "%s". Run mainMyoDrum without ' ...
+                'arguments to open the startup menu.'], mode);
+    end
+end
+
+function classifier = canonicalClassifier(classifier)
+    classifier = lower(strtrim(classifier));
+    switch classifier
+        case {"rule", "rules", "rule-based"}
+            classifier = "rule-based";
+        case {"ml", "machine-learning"}
+            classifier = "machine-learning";
+        case {"both", "hybrid"}
+            classifier = "hybrid";
+        otherwise
+            error('MyoDrum:UnknownClassifier', ...
+                'Unknown classifier "%s".', classifier);
+    end
+end
+
+function requireImplementedCombination(mode, classifier)
+    if mode == "imu-emg-6"
+        return;
+    end
+    if classifier ~= "rule-based"
+        if classifier == "machine-learning" && mode == "imu-emg-4"
+            error('MyoDrum:MachineLearningModelUnavailable', [ ...
+                'No trained live machine-learning model is available yet. ' ...
+                'Collect its dataset separately with: addpath("calibration"); ' ...
+                'calibrateMachineLearningDataset']);
+        end
+        error('MyoDrum:NotImplemented', [ ...
+            'Classifier "%s" is a reserved future option. Select the ' ...
+            'rule-based classifier for the current prototype.'], classifier);
+    end
+end
+
+function runIMUOnly(root)
+    addpath(fullfile(root, 'IMU_subsystem'));
+    addpath(fullfile(root, 'calibration'));
+    addpath(fullfile(root, 'classifiers', 'ruleBased'));
+    addpath(fullfile(root, 'audio'));
+    addpath(fullfile(root, 'drumRunTests', 'kickOnly'));
+    mainDualKickIMU("three-drum");
+end
+
+function runEMGOnly(root)
+    addpath(fullfile(root, 'EMG_subsystem'));
+    addpath(fullfile(root, 'drumRunTests', 'emgOnly'));
+    mainEMGStreamRecord;
+end
+
+function runFourChannelFusion(root)
+    addpath(fullfile(root, 'IMU_subsystem'));
+    addpath(fullfile(root, 'EMG_subsystem'));
+    addpath(fullfile(root, 'classifiers', 'ruleBased'));
+    addpath(fullfile(root, 'calibration'));
+    addpath(fullfile(root, 'audio'));
+    addpath(fullfile(root, 'drumRunTests', 'combined'));
+    mainIMUEMGStream;
+end
+
+function printClassifierStatus
+    fprintf('\nMYODRUM CLASSIFIERS\n');
+    fprintf('  1. Rule based: available and under validation.\n');
+    fprintf(['  2. Machine learning: collect labelled data separately with ' ...
+        'calibrateMachineLearningDataset; live inference is future work.\n']);
+    fprintf('  3. Hybrid: reserved until both baselines are validated.\n\n');
 end

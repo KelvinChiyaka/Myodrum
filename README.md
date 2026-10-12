@@ -8,6 +8,34 @@ IMU+EMG inputs.
 The repository is organised around reproducible calibration and labelled data
 collection. The immediate pilot uses three targets: **kick, snare, and crash**.
 
+## Start MyoDrum
+
+Run the project entry point without arguments to choose the sensor interface
+and classifier interactively:
+
+```matlab
+cd("C:\Users\ndlov\OneDrive\Desktop\FinalMyodrum")
+mainMyoDrum
+```
+
+The public interfaces are IMU only, EMG only, synchronized IMU + four-channel
+EMG, and the reserved six-channel interface. Rule based classification is the
+current working implementation. Labelled machine-learning data collection is
+available separately; live ML inference, hybrid inference and the six-channel
+interface remain future stages.
+
+For repeatable testing the implemented modes can be started directly:
+
+```matlab
+mainMyoDrum("imu-only", "rule-based")
+mainMyoDrum("emg-only")
+mainMyoDrum("imu-emg-4", "rule-based")
+```
+
+Machine-learning collection is a separate calibration workflow. The machine-
+learning menu choice will become live inference only after a trained model has
+been validated and saved.
+
 ## Current working baseline
 
 The restored one-IMU kick detector is preserved as the behavioural baseline in
@@ -20,16 +48,10 @@ calibration around that detector. Both results are saved and reused unless a
 force-recalibration flag is enabled. Calibrated acceleration is used by the
 jerk detector without changing its state machine.
 
-From the repository root in MATLAB:
+For the current two-hand IMU workflow, use:
 
 ```matlab
-mainMyoDrum("kick-only")
-```
-
-For the current two-hand workflow, use:
-
-```matlab
-mainMyoDrum("dual-kick")
+mainMyoDrum("imu-only", "rule-based")
 ```
 
 This mode connects to both MPU6050s, loads or performs six-pose calibration
@@ -52,11 +74,7 @@ reference and drifts. Tilt (pitch/roll) comes from gravity and does not.
   cannot leak into the heading;
 - re-estimates residual gyro bias and freezes azimuth while the stick is still.
 
-In three-drum mode either stick can play kick, snare, or crash:
-
-```matlab
-mainMyoDrum("three-drum")
-```
+In IMU-only mode either stick can play kick, snare, or crash.
 
 The default `gravity-zones` strategy calibrates three independent 3-D gravity
 directions for each stick. It compares unit vectors directly rather than
@@ -87,8 +105,10 @@ At 250 dps a fast stroke or a sweep between drums clips and the lost rotation
 corrupts the integrated heading. If kick detection feels different, set it
 back to 250 (positions will then be less accurate) and tell me.
 
-Live orientation graphs are disabled in playing modes because rendering them
-caused large audio delays; orientation is still estimated and recorded.
+The synchronized four-channel live-play mode does not plot while playing.
+Accepted and rejected fusion decisions are written to the Command Window only
+after the audio trigger, keeping graphics and console work out of the critical
+sound path.
 
 Orientation can be re-evaluated offline from any recorded session:
 
@@ -97,44 +117,53 @@ addpath tools
 orientationReplayReport("session_20261010_150626")
 ```
 
-The legacy dual-IMU diagnostic and calibration program remains available:
-
-```matlab
-mainMyoDrum("imu-diagnostics")
-```
-
-Use `mainMyoDrum("status")` to display the shared configuration.
-
 To record the four standalone EMG envelope channels without IMUs, audio, or
 hit detection, run:
 
 ```matlab
-mainMyoDrum("emg")
+mainMyoDrum("emg-only")
 ```
 
 The recorder saves raw voltages and session metadata under the same timestamped
 `data/` convention as the IMU recorder and reports its measured set rate.
 
 For hit-timing data, upload the tracked Mega firmware under
-`firmware/MyoDrumEMGStream/` and use `mainMyoDrum("emg-stream")`. This replaces
+`firmware/MyoDrumEMGStream/` and use `mainMyoDrum("emg-only")`. This replaces
 four slow `readVoltage` round trips with a continuous 250 Hz binary stream.
-
-For labelled, synchronized gesture recordings from both IMUs and all four EMG
-envelopes, run `mainMyoDrum("imu-emg")`. This mode repeats the three-drum
-calibration and records host acquisition-window timestamps. It is intended for
-dataset collection; the ordinary `three-drum` mode remains faster for playing.
 
 For real-time synchronized fusion, upload
 `firmware/MyoDrumIMUEMGStream/MyoDrumIMUEMGStream.ino` to the Mega and run:
 
 ```matlab
-mainMyoDrum("imu-emg-stream")
+mainMyoDrum("imu-emg-4", "rule-based")
 ```
 
 This firmware puts both MPU6050 bursts and all four EMG envelopes in the same
 200 Hz device-timestamped packet. The IMU chooses the drum; EMG only confirms
 the strike. A rest/active calibration normalizes every EMG channel separately,
 so independently adjusted amplifier gains do not share a voltage threshold.
+
+## Collect labelled machine-learning data
+
+Keep the synchronized `MyoDrumIMUEMGStream` firmware loaded and run:
+
+```matlab
+addpath("calibration")
+calibrateMachineLearningDataset
+```
+
+This is a recording workflow, not a live classifier. It performs the same IMU
+bias and per-channel EMG reference checks, then records three balanced rounds
+of `NO_HIT`, `KICK`, `SNARE`, and `CRASH` blocks for each hand. There are no
+plots or sounds. Use the small control window to start and finish each block;
+the stream is stopped while each checkpoint is saved. Raw synchronized frames
+are written to `data/raw/session_<timestamp>/mlTrainingStream.mat`, while the
+block manifest and session metadata are written under the matching
+`data/metadata/sessions/` folder.
+
+Block labels describe the requested activity during that interval. They do not
+mean every individual 200 Hz frame is a drum hit. A later feature-extraction
+stage must locate one short movement window per strike inside each hit block.
 
 To deliberately repeat calibration, edit `common/myoDrumConfig.m`:
 
@@ -160,7 +189,7 @@ automatically to orientation warm-up and kick playback.
 ## Development sequence
 
 1. Verify both IMUs, their hand assignment, measured read rate, and data quality.
-2. Implement guided per-session calibration for kick, snare, and crash.
+2. Design a reliable labelled validation procedure for kick, snare, and crash.
 3. Record labelled raw trials and metadata without overwriting earlier sessions.
 4. Establish a rule-based baseline.
 5. Train and evaluate ML models with session/round-aware splits.

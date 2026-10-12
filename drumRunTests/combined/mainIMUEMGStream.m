@@ -37,10 +37,10 @@ function mainIMUEMGStream
     reader = IMUEMGStreamReader(cfg.Hardware.COMPort, ...
         cfg.EMG.CombinedStreamBaud);
     cleanupReader = onCleanup(@()delete(reader));
-    reader.start();
 
     fprintf('\nREST/BIAS CALIBRATION\n');
     input('Keep both sticks and all muscles relaxed, then press Enter...', 's');
+    reader.start();
     restFrames = collectForSeconds(reader, max(3, cfg.EMG.RestSeconds), cfg);
     ensureHealthyFrames(restFrames, cfg);
     gyroBiasDps = zeros(2, 3);
@@ -51,31 +51,58 @@ function mainIMUEMGStream
     restVoltage = adcToVolts(restFrames.emgAdc, cfg);
 
     activeFrames = emptyFrames;
+    activeSampleHands = strings(0,1);
     for hand = 1:2
         fprintf('\n%s EMG GAIN CALIBRATION\n', cfg.IMU.HandNames(hand));
-        input(sprintf(['Keep the other arm relaxed. With the %s hand, play ' ...
-            'comfortable KICK, SNARE and CRASH gestures repeatedly, then ' ...
-            'press Enter...'], cfg.IMU.HandNames(hand)), 's');
+        input(sprintf(['Keep the other arm relaxed. Press Enter to START, ' ...
+            'then immediately use the %s hand to play comfortable KICK, ' ...
+            'SNARE and CRASH gestures for %.0f seconds...'], ...
+            cfg.IMU.HandNames(hand), ...
+            cfg.EMG.ActiveCalibrationSeconds), 's');
+        discardPendingFrames(reader, cfg);
+        fprintf('RECORDING %s EMG NOW...\n', cfg.IMU.HandNames(hand));
         trial = collectForSeconds(reader, ...
             cfg.EMG.ActiveCalibrationSeconds, cfg);
         activeFrames = appendFrames(activeFrames, trial);
+        activeSampleHands = [activeSampleHands; repmat( ...
+            cfg.IMU.HandNames(hand), numel(trial.time_s), 1)]; %#ok<AGROW>
     end
     activeVoltage = adcToVolts(activeFrames.emgAdc, cfg);
     profile = buildEMGConfirmationProfile(restVoltage, activeVoltage, ...
         cfg.EMG.Hands, MinimumActiveSpanVolts= ...
-        cfg.EMG.MinimumActiveSpanVolts);
-    printEMGProfile(profile, cfg);
-    if ~all(profile.validChannel)
-        bad = strjoin(cfg.EMG.ChannelNames(~profile.validChannel), ', ');
-        error('MyoDrum:WeakEMGCalibration', ...
-            ['These channels did not rise enough above rest: %s. Adjust ' ...
-             'their individual amplifier gains/electrodes and retry.'], bad);
-    end
+        cfg.EMG.MinimumActiveSpanVolts, ...
+        ActiveSampleHands=activeSampleHands, ...
+        RailVolts=cfg.EMG.Quality.RailVolts, ...
+        MaximumRailFraction=cfg.EMG.Quality.MaximumRailFraction, ...
+        MaximumRestSigmaVolts=cfg.EMG.Quality.RestSigmaWarnVolts, ...
+        MinimumSignalToNoiseRatio= ...
+        cfg.EMG.Quality.MinimumSignalToNoiseRatio, ...
+        NoiseFloorVolts=cfg.EMG.Quality.NoiseFloorVolts);
     emgCalibration.restFrames = restFrames;
     emgCalibration.activeFrames = activeFrames;
+    emgCalibration.activeSampleHands = activeSampleHands;
     emgCalibration.profile = profile;
     save(fullfile(rawFolder, 'emgConfirmationCalibration.mat'), ...
         'emgCalibration', '-v7.3');
+    printEMGProfile(profile, cfg);
+    if ~all(profile.validChannel)
+        invalid = ~profile.validChannel(:);
+        reasons = profile.qualityReason(:);
+        details = cfg.EMG.ChannelNames(invalid) + " (" + ...
+            reasons(invalid) + ")";
+        metadata.emgProfile = profile;
+        metadata.emgSafetyCheckPassed = false;
+        save(metadataFile, 'metadata');
+        error('MyoDrum:UnsafeEMGCalibration', ...
+            ['EMG hardware check failed: %s. Audio was NOT enabled. ' ...
+             'Reconnect the envelope outputs, check the common ground, ' ...
+             'reduce any saturating gain, and retry.'], ...
+            strjoin(details, ', '));
+    end
+    metadata.emgProfile = profile;
+    metadata.emgSafetyCheckPassed = true;
+    save(metadataFile, 'metadata');
+    fprintf('EMG safety check passed. Audio can now be enabled.\n');
 
     estimators = cell(1, 2);
     for hand = 1:2
@@ -96,7 +123,14 @@ function mainIMUEMGStream
     detectors = [initializeKickDetector, initializeKickDetector];
     banks = createDrumPlayerBanks(cfg.Paths.Audio, cfg.Targets.Names, ...
         cfg.Targets.AudioFiles, cfg.Kick.AudioVoices);
-    fig = createControlFigure;
+    showDashboard = cfg.Visualization.Enabled;
+    if showDashboard
+        dashboard = createLiveSensorDashboard(cfg);
+        fig = dashboard.Figure;
+    else
+        dashboard = struct;
+        fig = createControlFigure;
+    end
     cleanupFigure = onCleanup(@()closeFigure(fig));
 
     log = emptyLog;
@@ -106,8 +140,14 @@ function mainIMUEMGStream
     peakGyro = zeros(2, 3);
     peakMagnitude = zeros(1, 2);
     fusion = initializeFusionClassifier;
+    lastRailTime_s = -inf(1, numel(cfg.EMG.ChannelNames));
+    runtimeFaultReported = false(1, numel(cfg.EMG.ChannelNames));
     fusionEventCells = cell(0, 1);
     lastCheckpointTime = -inf;
+    lastDashboardTime = -inf;
+    displayLabels = strings(1, 2);
+    displayScores = zeros(1, 2);
+    discardPendingFrames(reader, cfg);
     fprintf(['\nREADY. IMU selects the drum; independently normalized EMG ' ...
         'confirms each hit. Press Q or close the window to stop.\n\n']);
 
@@ -120,6 +160,20 @@ function mainIMUEMGStream
         for row = 1:numel(frames.sequence)
             normalizedEMG = max(0, (volts(row, :) - ...
                 profile.baseline_V) ./ profile.activeSpan_V);
+            railed = volts(row, :) >= cfg.EMG.Quality.RailVolts;
+            lastRailTime_s(railed) = frames.time_s(row);
+            runtimeValid = profile.validChannel & ...
+                frames.time_s(row) - lastRailTime_s >= ...
+                cfg.EMG.Quality.RuntimeRailHoldSeconds;
+            normalizedEMG(~runtimeValid) = 0;
+            newlyFaulted = ~runtimeValid & ~runtimeFaultReported;
+            if any(newlyFaulted)
+                warning('MyoDrum:EMGRuntimeRail', ...
+                    ['EMG channel(s) %s railed at runtime and were ' ...
+                     'temporarily removed from hit confirmation.'], ...
+                    strjoin(cfg.EMG.ChannelNames(newlyFaulted), ', '));
+                runtimeFaultReported(newlyFaulted) = true;
+            end
             rawAccel = reshape(frames.accelG(row, :, :), 1, 3, 2);
             calibratedAccel = zeros(1, 3, 2);
             correctedGyro = zeros(1, 3, 2);
@@ -177,7 +231,13 @@ function mainIMUEMGStream
             [fusion, decision, events] = updateFusionClassifier( ...
                 fusion, frames.time_s(row), candidateHit, ...
                 candidateLabels, normalizedEMG, cfg.EMG.Hands, ...
-                profile.validChannel(:), cfg.Fusion);
+                runtimeValid(:), cfg.Fusion);
+            displayScores = decision.emgScore;
+            for hand = 1:2
+                if candidateLabels(hand) ~= ""
+                    displayLabels(hand) = candidateLabels(hand);
+                end
+            end
             targetIndex = zeros(1, 2, 'uint8');
             candidateTargetIndex = zeros(1, 2, 'uint8');
             for hand = 1:2
@@ -192,21 +252,38 @@ function mainIMUEMGStream
             end
             for eventIndex = 1:numel(events)
                 fusionEventCells{end+1,1} = events(eventIndex); %#ok<AGROW>
-                fprintf('%s %s | %s | EMG %.2f | latency %.0f ms\n', ...
-                    cfg.IMU.HandNames(events(eventIndex).handIndex), ...
-                    events(eventIndex).orientationLabel, ...
-                    events(eventIndex).reason, ...
-                    events(eventIndex).peakEMGScore, ...
-                    1000 * events(eventIndex).decisionLatency_s);
             end
-            acceptedLabels = decision.labels(decision.accepted & ...
-                decision.labels ~= "");
-            for label = unique(acceptedLabels, 'stable')
-                banks = playLabel(banks, label);
+            % Play once per accepted hand. Do not collapse equal labels: a
+            % simultaneous KICK from both sticks must use two audio voices.
+            for hand = 1:2
+                if decision.accepted(hand) && decision.labels(hand) ~= ""
+                    banks = playLabel(banks, decision.labels(hand));
+                end
+            end
+            % Console rendering is deliberately after audio so diagnostic
+            % feedback can never delay an accepted hit's sound trigger.
+            if cfg.Runtime.PrintHitEvents
+                for eventIndex = 1:numel(events)
+                    fprintf('%s %s | %s | EMG %.2f | latency %.0f ms\n', ...
+                        cfg.IMU.HandNames(events(eventIndex).handIndex), ...
+                        events(eventIndex).orientationLabel, ...
+                        events(eventIndex).reason, ...
+                        events(eventIndex).peakEMGScore, ...
+                        1000 * events(eventIndex).decisionLatency_s);
+                end
             end
             log = appendLog(log, frames, row, rawAccel, calibratedAccel, ...
                 correctedGyro, ypr, volts(row, :), profile, candidateHit, ...
-                decision, candidateTargetIndex, targetIndex);
+                decision, candidateTargetIndex, targetIndex, runtimeValid);
+        end
+        if showDashboard && ~isempty(log.time_s) && ...
+                log.time_s(end) - lastDashboardTime >= ...
+                1 / cfg.Visualization.RefreshRateHz
+            updateLiveSensorDashboard(dashboard, log, cfg, ...
+                displayLabels, displayScores);
+            lastDashboardTime = log.time_s(end);
+        elseif ~showDashboard
+            drawnow limitrate;
         end
         if ~isempty(log.time_s) && log.time_s(end)-lastCheckpointTime >= ...
                 cfg.Logging.StreamCheckpointSeconds
@@ -220,7 +297,6 @@ function mainIMUEMGStream
             save(metadataFile, 'metadata');
             lastCheckpointTime = log.time_s(end);
         end
-        drawnow limitrate;
     end
     if ~isempty(log.time_s)
         [fusion, ~, finalEvents] = updateFusionClassifier(fusion, ...
@@ -280,18 +356,54 @@ end
 function frames = collectForSeconds(reader, seconds, cfg)
     frames = emptyFrames;
     startTime = [];
+    phaseTimer = tic;
+    lastFrameTimer = tic;
     while isempty(startTime) || isempty(frames.time_s) || ...
             frames.time_s(end) - startTime < seconds
         available = reader.readAvailableFrames();
-        if isempty(available.sequence), pause(0.001); continue; end
+        if isempty(available.sequence)
+            if toc(lastFrameTimer) > cfg.EMG.StreamTimeoutSeconds
+                error('MyoDrum:CombinedStreamTimeout', ...
+                    ['No synchronized sensor frames arrived for %.1f ' ...
+                     'seconds. Check that the combined firmware is running, ' ...
+                     'then reconnect the Mega and retry.'], ...
+                    cfg.EMG.StreamTimeoutSeconds);
+            end
+            pause(0.001);
+            continue;
+        end
+        lastFrameTimer = tic;
         if isempty(startTime), startTime = available.time_s(1); end
         frames = appendFrames(frames, available);
+        if toc(phaseTimer) > seconds + cfg.EMG.StreamTimeoutSeconds
+            error('MyoDrum:CombinedStreamTooSlow', ...
+                ['The synchronized stream did not provide %.1f seconds of ' ...
+                 'data within the allowed time.'], seconds);
+        end
     end
     expected = floor(seconds * cfg.EMG.CombinedStreamRateHz * 0.8);
     if numel(frames.sequence) < expected
         warning('MyoDrum:SlowCombinedStream', ...
             'Only %d frames arrived; expected at least %d.', ...
             numel(frames.sequence), expected);
+    end
+end
+
+function discardPendingFrames(reader, cfg)
+    % The firmware streams while MATLAB waits at operator prompts. Read and
+    % discard that queued history until the host catches the live edge. Using
+    % reads instead of serial flush also releases a Mega blocked in Serial.write.
+    timer = tic;
+    while true
+        pending = reader.readAvailableFrames();
+        if isempty(pending.sequence)
+            return;
+        end
+        if toc(timer) > cfg.EMG.StreamTimeoutSeconds
+            error('MyoDrum:CombinedStreamBacklog', ...
+                ['MATLAB could not catch up with the synchronized stream. ' ...
+                 'Reconnect the Mega and retry.']);
+        end
     end
 end
 
@@ -326,9 +438,15 @@ end
 
 function printEMGProfile(profile, cfg)
     disp(table(cfg.EMG.ChannelNames, cfg.EMG.AnalogPins, ...
-        profile.baseline_V', profile.activeReference_V', ...
-        profile.activeSpan_V', profile.validChannel', 'VariableNames', ...
-        {'Channel','Pin','Rest_V','ActiveReference_V','Span_V','Valid'}));
+        profile.baseline_V', profile.noiseSigma_V', ...
+        profile.activeReference_V', profile.activeSpan_V', ...
+        100 * profile.restRailFraction', ...
+        100 * profile.activeRailFraction', ...
+        profile.signalToNoiseRatio', profile.validChannel', ...
+        profile.qualityReason', 'VariableNames', ...
+        {'Channel','Pin','Rest_V','RestNoise_V','ActiveReference_V', ...
+         'Span_V','RestRail_pct','ActiveRail_pct','SignalToNoise', ...
+         'Valid','Reason'}));
 end
 
 function fig = createControlFigure
@@ -360,13 +478,15 @@ function log = emptyLog
     log.emgConfirmedHit=false(0,2); log.fusionAcceptedHit=false(0,2);
     log.fusionRejectedHit=false(0,2); log.fusionPendingActive=false(0,2);
     log.emgConfirmationScore=zeros(0,2);
+    log.emgRuntimeValid=false(0,4);
     log.fusionDecisionCode=zeros(0,2,'uint8');
     log.candidateTargetIndex=zeros(0,2,'uint8');
     log.targetIndex=zeros(0,2,'uint8');
 end
 
 function log = appendLog(log, frames, row, raw, calibrated, gyro, ypr, ...
-        volts, profile, candidate, decision, candidateTarget, target)
+        volts, profile, candidate, decision, candidateTarget, target, ...
+        runtimeValid)
     at = numel(log.time_s) + 1;
     log.time_s(at,1)=frames.time_s(row); log.sequenceNumber(at,1)=frames.sequence(row);
     log.deviceStatus(at,1)=frames.status(row); log.frameValid(at,:)=frames.frameValid(row,:);
@@ -381,6 +501,7 @@ function log = appendLog(log, frames, row, raw, calibrated, gyro, ypr, ...
     log.fusionRejectedHit(at,:)=decision.rejected;
     log.fusionPendingActive(at,:)=decision.pendingActive;
     log.emgConfirmationScore(at,:)=decision.emgScore;
+    log.emgRuntimeValid(at,:)=runtimeValid;
     log.fusionDecisionCode(at,:)=decisionCodes(decision);
     log.candidateTargetIndex(at,:)=candidateTarget;
     log.targetIndex(at,:)=target;

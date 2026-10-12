@@ -21,3 +21,7 @@ The earlier five-drum mapping experiment is preserved under
 - each stick has a saved downstroke-axis/sign calibration;
 - reusable mounting calibration is stored under `data/metadata/calibration/`;
 - session-specific gyro results are stored with that session's metadata.
+
+`calibrateMachineLearningDataset.m` is the separate labelled-data workflow.
+It records synchronized dual-IMU and four-channel EMG blocks for later model
+training; it is intentionally not launched by the live `mainMyoDrum` menu.

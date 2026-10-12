@@ -94,3 +94,21 @@ They additionally store `sequenceNumber` (`N`-by-1 uint16) and `deviceStatus`
 (`N`-by-1 uint8). Their `time_s` is derived from the rollover-corrected Arduino
 `micros()` clock; `metadata.streamStatistics` records dropped frames, checksum
 failures, resynchronisations and measured device rate.
+
+## Machine-learning labelled collection
+
+Run `calibrateMachineLearningDataset` from the `calibration/` workflow with the
+synchronized dual-IMU/four-channel firmware. Each `mlTrainingStream.mat` row
+contains the two raw and calibrated
+accelerometers, raw and bias-corrected gyroscopes, temperatures, raw ADC values,
+EMG volts, normalized EMG, device timestamp, validity, block, round, prompted
+hand, and prompted class index. `classNames` maps class indices to `NO_HIT`,
+`KICK`, `SNARE`, and `CRASH`.
+
+`blockManifest` and `mlCollectionManifest.csv` store one row per prompted
+block, including the round, hand, class, expected hit count, actual recording
+duration, frame count, and completion status. A block label is interval-level
+ground truth: inter-strike frames in a hit block are not themselves hits.
+Feature preparation must segment candidate movement windows inside the block
+before training. Training, validation, and test partitions must remain grouped
+by session or collection round.

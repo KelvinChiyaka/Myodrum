@@ -14,6 +14,9 @@ classdef IMUEMGStreamReader < handle
         TimestampWraps (1,1) double = 0
         FirstExtendedTimestamp = []
         LastExtendedTimestamp = []
+        PreviousRateTimestamp = []
+        RateIntervalCount (1,1) double = 0
+        RateIntervalTotalSeconds (1,1) double = 0
     end
     methods
         function obj = IMUEMGStreamReader(portName, baudRate)
@@ -32,7 +35,10 @@ classdef IMUEMGStreamReader < handle
             flush(obj.Port);
         end
         function start(obj)
-            flush(obj.Port);
+            flush(obj.Port, "input");
+            obj.ByteBuffer = zeros(0, 1, 'uint8');
+            obj.LastSequence = [];
+            obj.PreviousRateTimestamp = [];
             write(obj.Port, uint8('S'), 'uint8');
         end
         function stop(obj)
@@ -58,17 +64,19 @@ classdef IMUEMGStreamReader < handle
             statistics.droppedFrames = obj.DroppedFrames;
             statistics.checksumFailures = obj.ChecksumFailures;
             statistics.parseResets = obj.ParseResets;
-            if obj.FramesReceived > 1 && ...
-                    obj.LastExtendedTimestamp > obj.FirstExtendedTimestamp
-                elapsed = (obj.LastExtendedTimestamp - ...
-                    obj.FirstExtendedTimestamp) / 1e6;
-                statistics.measuredRateHz = (obj.FramesReceived - 1) / elapsed;
+            if obj.RateIntervalCount > 0 && ...
+                    obj.RateIntervalTotalSeconds > 0
+                statistics.measuredRateHz = obj.RateIntervalCount / ...
+                    obj.RateIntervalTotalSeconds;
             else
                 statistics.measuredRateHz = NaN;
             end
         end
         function delete(obj)
-            try, obj.stop(); catch, end
+            try
+                obj.stop();
+            catch
+            end
             obj.Port = [];
         end
     end
@@ -88,6 +96,16 @@ classdef IMUEMGStreamReader < handle
                 end
                 obj.LastExtendedTimestamp = extended;
                 obj.PreviousTimestamp = current;
+                if ~isempty(obj.PreviousRateTimestamp)
+                    intervalSeconds = (extended - ...
+                        obj.PreviousRateTimestamp) / 1e6;
+                    if intervalSeconds > 0
+                        obj.RateIntervalCount = obj.RateIntervalCount + 1;
+                        obj.RateIntervalTotalSeconds = ...
+                            obj.RateIntervalTotalSeconds + intervalSeconds;
+                    end
+                end
+                obj.PreviousRateTimestamp = extended;
                 seconds(index) = (extended - obj.FirstExtendedTimestamp) / 1e6;
             end
         end

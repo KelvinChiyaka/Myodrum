@@ -74,6 +74,17 @@ function cfg = myoDrumConfig(projectRoot)
     cfg.Logging.BufferSamples = 5000;
     cfg.Logging.StreamCheckpointSeconds = 30;
 
+    % Keep plotting out of the live-play path. The dashboard helpers remain
+    % available for offline diagnostics, but MATLAB graphics must not compete
+    % with the 200 Hz detector, fusion logic or audio playback.
+    cfg.Visualization.Enabled = false;
+    cfg.Visualization.RefreshRateHz = 5;
+    cfg.Visualization.WindowSeconds = 6;
+    cfg.Visualization.MaximumPoints = 600;
+    % Print only completed fusion decisions, rather than continuous sensor
+    % values. This gives immediate, low-volume feedback without live plots.
+    cfg.Runtime.PrintHitEvents = true;
+
     % The first controlled pilot deliberately uses three separable targets.
     cfg.Targets.Names = ["KICK", "SNARE", "CRASH"];
     cfg.Targets.CalibrationHitsPerTargetPerHand = 10;
@@ -134,11 +145,18 @@ function cfg = myoDrumConfig(projectRoot)
     cfg.EMG.Quality.FlatRangeVolts = 0.005;
     cfg.EMG.Quality.RailVolts = 4.8;
     cfg.EMG.Quality.RestSigmaWarnVolts = 0.15;
+    % Combined play fails closed when floating/disconnected analog inputs
+    % rail, remain noisy at rest, or cannot rise clearly above their noise.
+    cfg.EMG.Quality.MaximumRailFraction = 0.02;
+    cfg.EMG.Quality.MinimumSignalToNoiseRatio = 4.0;
+    cfg.EMG.Quality.RuntimeRailHoldSeconds = 1.0;
     cfg.EMG.StreamBaud = 250000;
     cfg.EMG.StreamRateHz = 250;
     cfg.EMG.StreamProtocolVersion = 1;
     cfg.EMG.ADCReferenceVolts = 5.0;
     cfg.EMG.ADCMaxCount = 1023;
+    cfg.EMG.Quality.NoiseFloorVolts = ...
+        cfg.EMG.ADCReferenceVolts / cfg.EMG.ADCMaxCount;
     cfg.EMG.StreamPlotEverySeconds = 0.10;
     cfg.EMG.HitThresholdVolts = 3.0; % Placeholder for later EMG fusion.
     % Synchronized stream/fusion settings. Every channel is normalized using
@@ -146,6 +164,7 @@ function cfg = myoDrumConfig(projectRoot)
     % do not create unequal confirmation thresholds.
     cfg.EMG.CombinedStreamRateHz = 200;
     cfg.EMG.CombinedStreamBaud = 250000;
+    cfg.EMG.StreamTimeoutSeconds = 3.0;
     cfg.EMG.ActiveCalibrationSeconds = 6;
     cfg.EMG.ConfirmationWindowSeconds = 0.18;
     cfg.EMG.NormalizedConfirmationThreshold = 0.20;
@@ -158,6 +177,16 @@ function cfg = myoDrumConfig(projectRoot)
     cfg.Fusion.EMGConfirmationTimeoutSeconds = 0.12;
     cfg.Fusion.MinimumInterAcceptedHitSeconds = 0.28;
     cfg.Fusion.RequiredActiveChannels = 1;
+
+    % Labelled collection for the first standalone machine-learning model.
+    % Each round contains every hand/class combination. Hit blocks are ended
+    % by the operator after the requested repetitions; NO_HIT blocks enforce
+    % a minimum duration so normal movement is adequately represented.
+    cfg.MachineLearning.ClassNames = ["NO_HIT", cfg.Targets.Names];
+    cfg.MachineLearning.CollectionRounds = 3;
+    cfg.MachineLearning.HitsPerClassPerHandPerRound = 10;
+    cfg.MachineLearning.NoHitMinimumSeconds = 10;
+    cfg.MachineLearning.ScheduleVersion = "ml-blocks-1";
 
     cfg.Paths.ProjectRoot = string(projectRoot);
     cfg.Paths.Audio = string(fullfile(projectRoot, 'audio'));

@@ -12,7 +12,8 @@ Myodrum/
 |   `-- machineLearning/
 |-- drumRunTests/
 |   |-- kickOnly/
-|   `-- pilotMapping/
+|   |-- pilotMapping/
+|   `-- machineLearning/
 |-- common/
 |-- data/
 |   |-- raw/
@@ -29,20 +30,27 @@ Myodrum/
 
 ## Responsibilities
 
-- `mainMyoDrum.m` is the small integration and session entry point. It selects
-  modes but does not duplicate sensor or classifier algorithms.
+- `mainMyoDrum.m` is the small integration and session entry point. Its startup
+  menu selects IMU only, EMG only, four-channel IMU + EMG, or a reserved
+  six-channel interface, followed by the classifier choice. Only rule based
+  classification is enabled until the labelled-data baseline is complete. The
+  entry point selects modes but does not duplicate sensor or classifier algorithms.
 - `IMU_subsystem/` owns MPU6050 connection, register configuration, acquisition,
   bias/scale calibration, health checks, and IMU-derived motion features.
 - `EMG_subsystem/` will own EMG acquisition, channel mapping, filtering,
   baselines, normalization, quality checks, and activation features.
 - `calibration/` will coordinate session calibration and discrete target
-  calibration. Sensor calibration and target calibration remain distinct.
+  calibration, including the separate machine-learning dataset collection
+  entry point. Sensor calibration and target calibration remain distinct.
 - `classifiers/ruleBased/` contains explicit, interpretable thresholds and
   decision logic independent of audio playback.
 - `classifiers/machineLearning/` contains feature preparation, grouped
   validation, training, inference, and model metadata.
 - `drumRunTests/` contains laboratory workflows that call reusable code. The
   known working kick prototype and earlier five-drum pilot are retained here.
+  The machine-learning collector implementation records balanced, labelled
+  synchronized IMU/EMG blocks without changing the working live-play path; it
+  is launched by `calibration/calibrateMachineLearningDataset.m`.
 - `common/` contains shared configuration, labels, validation, timestamps, and
   logging helpers.
 - `data/` is the runtime data boundary. Raw trials are immutable; derived data
@@ -64,7 +72,7 @@ session-aware dataset before scaling up.
 
 ## Current integrated path
 
-`mainMyoDrum("dual-kick")` coordinates these layers:
+`mainMyoDrum("imu-only", "rule-based")` coordinates these layers:
 
 1. `IMU_subsystem/` connects and reads both sensors.
 2. `calibration/calibrateDualIMUSession.m` loads/runs six-pose calibration,

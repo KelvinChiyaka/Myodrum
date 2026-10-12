@@ -63,9 +63,39 @@ function testPerChannelGainNormalization(testCase)
     verifyFalse(testCase, wrongOk); verifyEqual(testCase, wrongScore, 0);
 end
 
+function testHandSpecificCalibrationUsesOnlyMatchingHand(testCase)
+    rest = zeros(40, 4);
+    left = repmat([1.0 1.2 4.0 4.0], 30, 1);
+    right = repmat([3.5 3.5 0.8 1.1], 30, 1);
+    active = [left; right];
+    activeHands = [repmat("LEFT", 30, 1); repmat("RIGHT", 30, 1)];
+    hands = ["LEFT";"LEFT";"RIGHT";"RIGHT"];
+    profile = buildEMGConfirmationProfile(rest, active, hands, ...
+        ActiveSampleHands=activeHands);
+    verifyEqual(testCase, profile.activeReference_V, ...
+        [1.0 1.2 0.8 1.1], 'AbsTol', 1e-12);
+end
+
+function testRailedFloatingInputsFailCalibration(testCase)
+    rest = zeros(100, 4);
+    rest(1:30, :) = 5;
+    active = rest;
+    hands = ["LEFT";"LEFT";"RIGHT";"RIGHT"];
+    activeHands = [repmat("LEFT", 50, 1); repmat("RIGHT", 50, 1)];
+    profile = buildEMGConfirmationProfile(rest, active, hands, ...
+        ActiveSampleHands=activeHands, RailVolts=4.8, ...
+        MaximumRailFraction=0.02, MaximumRestSigmaVolts=0.15, ...
+        MinimumSignalToNoiseRatio=4, NoiseFloorVolts=5/1023);
+    verifyFalse(testCase, any(profile.validChannel));
+    verifyTrue(testCase, all(contains(profile.qualityReason, ...
+        "RAILED_OR_SATURATED")));
+end
+
 function testProjectExposesCombinedMode(testCase)
     entry = fileread(fullfile(testCase.TestData.Root, 'mainMyoDrum.m'));
-    verifyNotEmpty(testCase, regexp(entry, 'imu-emg-stream', 'once'));
+    verifyNotEmpty(testCase, regexp(entry, 'imu-emg-4', 'once'));
+    verifyTrue(testCase, isfile(fullfile(testCase.TestData.Root, 'common', ...
+        'createLiveSensorDashboard.m')));
     verifyTrue(testCase, isfile(fullfile(testCase.TestData.Root, 'firmware', ...
         'MyoDrumIMUEMGStream', 'MyoDrumIMUEMGStream.ino')));
 end
