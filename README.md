@@ -154,8 +154,9 @@ calibrateMachineLearningDataset
 
 This is a recording workflow, not a live classifier. It performs the same IMU
 bias and per-channel EMG reference checks, then records three balanced rounds
-of `NO_HIT`, `KICK`, `SNARE`, and `CRASH` blocks for each hand. There are no
-plots or sounds. Use the small control window to start and finish each block;
+of `NO_HIT`, `KICK`, `SNARE`, and `CRASH` blocks for each hand. Each hit block
+requests 20 repetitions and ends when the operator clicks DONE; it is not a
+countdown trial. There are no plots or sounds. Use the small control window to start and finish each block;
 the stream is stopped while each checkpoint is saved. Raw synchronized frames
 are written to `data/raw/session_<timestamp>/mlTrainingStream.mat`, while the
 block manifest and session metadata are written under the matching

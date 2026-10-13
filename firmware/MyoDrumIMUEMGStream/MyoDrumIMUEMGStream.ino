@@ -116,6 +116,10 @@ void processCommands() {
 void setup() {
   Serial.begin(SERIAL_BAUD);
   Wire.begin();
+  // A disconnected MPU6050 or an SDA/SCL line held low must not freeze the
+  // complete instrument during startup. Let MATLAB receive status-marked
+  // frames so it can report the failed sensor instead of seeing no stream.
+  Wire.setWireTimeout(3000, true);
   Wire.setClock(400000UL);
   analogReference(DEFAULT);
   DIDR0 |= _BV(ADC0D) | _BV(ADC2D) | _BV(ADC3D) | _BV(ADC4D);

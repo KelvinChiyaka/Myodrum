@@ -108,11 +108,11 @@ function mainMLDataCollection
         printEMGProfile(profile, cfg);
         requireSafeEMGProfile(profile, cfg);
 
-        fprintf(['\nCOLLECTION CONTROLS\nUse the control window: START begins ' ...
-            'a block, FINISH ends it, and Q stops safely.\n']);
-        fprintf(['Hit blocks request exactly %d gestures. NO_HIT blocks ' ...
-            'request normal non-striking movement.\n\n'], ...
+        fprintf(['\nCOLLECTION CONTROLS\nEach hit block names one hand and ' ...
+            'one drum. Perform exactly %d hits, then click DONE.\n'], ...
             cfg.MachineLearning.HitsPerClassPerHandPerRound);
+        fprintf(['Click BEGIN RECORDING only when you are positioned and ' ...
+            'ready. NO_HIT blocks request normal non-striking movement.\n\n']);
 
         for blockRow = 1:height(schedule)
             plan = schedule(blockRow, :);
@@ -281,7 +281,6 @@ function [frames, completed] = collectBlock(reader, fig, plan, cfg)
         else
             elapsed = frames.time_s(end) - startTime;
         end
-        updateElapsedTime(fig, elapsed);
         action = string(getappdata(fig, 'MyoDrumAction'));
         if action == "QUIT"
             return;
@@ -315,7 +314,12 @@ function printBlockPrompt(plan, blockCount)
             '%s gestures. Keep the other hand relaxed.\n'], ...
             plan.Hand, plan.ExpectedHitCount, plan.Label);
     end
-    fprintf('Click START. Click FINISH (or press Enter/N) when done.\n');
+    if plan.Label == "NO_HIT"
+        fprintf('Click BEGIN RECORDING, then click DONE when instructed.\n');
+    else
+        fprintf(['Click BEGIN RECORDING. Count your hits and click DONE ' ...
+            'immediately after hit %d.\n'], plan.ExpectedHitCount);
+    end
 end
 
 function fig = createCollectionControl
@@ -327,14 +331,11 @@ function fig = createCollectionControl
         'Units', 'normalized', 'Position', [0.05 0.55 0.90 0.36], ...
         'FontSize', 13, 'FontWeight', 'bold', ...
         'HorizontalAlignment', 'center', 'String', 'Preparing...');
-    elapsed = uicontrol(fig, 'Style', 'text', ...
-        'Units', 'normalized', 'Position', [0.35 0.42 0.30 0.10], ...
-        'FontSize', 11, 'String', 'Elapsed: 0.0 s');
-    uicontrol(fig, 'Style', 'pushbutton', 'String', 'START', ...
+    uicontrol(fig, 'Style', 'pushbutton', 'String', 'BEGIN RECORDING', ...
         'Units', 'normalized', 'Position', [0.08 0.12 0.24 0.20], ...
         'FontSize', 12, 'Callback', ...
         @(~,~)setCollectionAction(fig, "START"));
-    uicontrol(fig, 'Style', 'pushbutton', 'String', 'FINISH', ...
+    uicontrol(fig, 'Style', 'pushbutton', 'String', 'DONE', ...
         'Units', 'normalized', 'Position', [0.38 0.12 0.24 0.20], ...
         'FontSize', 12, 'Callback', ...
         @(~,~)setCollectionAction(fig, "FINISH"));
@@ -345,23 +346,28 @@ function fig = createCollectionControl
     setappdata(fig, 'MyoDrumAction', "");
     setappdata(fig, 'MyoDrumStage', "WAITING");
     setappdata(fig, 'InstructionHandle', instruction);
-    setappdata(fig, 'ElapsedHandle', elapsed);
 end
 
 function setControlPrompt(fig, plan, row, total, stage)
     setappdata(fig, 'MyoDrumStage', stage);
     setappdata(fig, 'MyoDrumAction', "");
     instruction = getappdata(fig, 'InstructionHandle');
-    if stage == "WAITING"
-        prefix = "READY";
-    else
-        prefix = "RECORDING";
-    end
     if isgraphics(instruction)
-        instruction.String = sprintf('%s | Block %d/%d | Round %d | %s %s', ...
-            prefix, row, total, plan.Round, plan.Hand, plan.Label);
+        if plan.Label == "NO_HIT"
+            instruction.String = sprintf( ...
+                'Block %d/%d | %s: natural movement without a hit', ...
+                row, total, plan.Hand);
+        elseif stage == "WAITING"
+            instruction.String = sprintf( ...
+                'Block %d/%d | %s: hit %s %d times', ...
+                row, total, plan.Hand, plan.Label, ...
+                plan.ExpectedHitCount);
+        else
+            instruction.String = sprintf( ...
+                'RECORDING | %s: complete %d %s hits, then click DONE', ...
+                plan.Hand, plan.ExpectedHitCount, plan.Label);
+        end
     end
-    updateElapsedTime(fig, 0);
 end
 
 function setReferencePrompt(fig, handName, durationSeconds)
@@ -373,7 +379,6 @@ function setReferencePrompt(fig, handName, durationSeconds)
             'READY | %s EMG reference | %.0f seconds', ...
             handName, durationSeconds);
     end
-    updateElapsedTime(fig, 0);
 end
 
 function setReferenceRecordingPrompt(fig, handName)
@@ -382,13 +387,6 @@ function setReferenceRecordingPrompt(fig, handName)
     instruction = getappdata(fig, 'InstructionHandle');
     if isgraphics(instruction)
         instruction.String = sprintf('RECORDING | %s EMG reference', handName);
-    end
-end
-
-function updateElapsedTime(fig, elapsed)
-    handle = getappdata(fig, 'ElapsedHandle');
-    if isgraphics(handle)
-        handle.String = sprintf('Elapsed: %.1f s', elapsed);
     end
 end
 

@@ -184,7 +184,7 @@ function cfg = myoDrumConfig(projectRoot)
     % a minimum duration so normal movement is adequately represented.
     cfg.MachineLearning.ClassNames = ["NO_HIT", cfg.Targets.Names];
     cfg.MachineLearning.CollectionRounds = 3;
-    cfg.MachineLearning.HitsPerClassPerHandPerRound = 10;
+    cfg.MachineLearning.HitsPerClassPerHandPerRound = 20;
     cfg.MachineLearning.NoHitMinimumSeconds = 10;
     cfg.MachineLearning.ScheduleVersion = "ml-blocks-1";
 

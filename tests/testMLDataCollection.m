@@ -19,7 +19,7 @@ function testDefaultScheduleIsBalanced(testCase)
         cfg.MachineLearning.NoHitMinimumSeconds);
 
     verifyEqual(testCase, height(schedule), 24);
-    verifyEqual(testCase, sum(double(schedule.ExpectedHitCount)), 180);
+    verifyEqual(testCase, sum(double(schedule.ExpectedHitCount)), 360);
     verifyEqual(testCase, unique(schedule.Label)', ...
         sort(cfg.MachineLearning.ClassNames));
     for currentRound = 1:cfg.MachineLearning.CollectionRounds
