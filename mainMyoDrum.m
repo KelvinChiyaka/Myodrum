@@ -1,8 +1,9 @@
-function mainMyoDrum(mode, classifier)
+function mainMyoDrum(mode, classifier, liveMode)
 
     arguments
         mode (1,1) string = "menu"
         classifier (1,1) string = "prompt"
+        liveMode (1,1) string = "prompt"
     end
 
     root = fileparts(mfilename('fullpath'));
@@ -36,7 +37,7 @@ function mainMyoDrum(mode, classifier)
         case "imu-only"
             runIMUOnly(root);
         case "imu-emg-4"
-            runFourChannelFusion(root);
+            runFourChannelFusion(root, liveMode, classifier);
         case "imu-emg-6"
             error('MyoDrum:NotImplemented', [ ...
                 'Six-channel IMU + EMG is reserved for the next hardware ' ...
@@ -70,8 +71,8 @@ end
 function classifier = promptForClassifier
     fprintf('\nSelect the classifier:\n');
     fprintf('  1. Rule based [available]\n');
-    fprintf('  2. Machine learning [collect/train separately]\n');
-    fprintf('  3. Hybrid rule based + machine learning [future]\n');
+    fprintf('  2. Machine learning [available]\n');
+    fprintf('  3. Hybrid rule based + machine learning [available]\n');
     choice = input('Selection: ');
     classifiers = ["rule-based", "machine-learning", "hybrid"];
     if ~isscalar(choice) || ~isnumeric(choice) || ~isfinite(choice) || ...
@@ -124,11 +125,9 @@ function requireImplementedCombination(mode, classifier)
         return;
     end
     if classifier ~= "rule-based"
-        if classifier == "machine-learning" && mode == "imu-emg-4"
-            error('MyoDrum:MachineLearningModelUnavailable', [ ...
-                'No trained live machine-learning model is available yet. ' ...
-                'Collect its dataset separately with: addpath("calibration"); ' ...
-                'calibrateMachineLearningDataset']);
+        if ismember(classifier, ["machine-learning", "hybrid"]) && ...
+                mode == "imu-emg-4"
+            return;
         end
         error('MyoDrum:NotImplemented', [ ...
             'Classifier "%s" is a reserved future option. Select the ' ...
@@ -151,20 +150,22 @@ function runEMGOnly(root)
     mainEMGStreamRecord;
 end
 
-function runFourChannelFusion(root)
+function runFourChannelFusion(root, liveMode, classifier)
     addpath(fullfile(root, 'IMU_subsystem'));
     addpath(fullfile(root, 'EMG_subsystem'));
     addpath(fullfile(root, 'classifiers', 'ruleBased'));
     addpath(fullfile(root, 'calibration'));
     addpath(fullfile(root, 'audio'));
     addpath(fullfile(root, 'drumRunTests', 'combined'));
-    mainIMUEMGStream;
+    addpath(fullfile(root, 'classifiers', 'machineLearning'));
+    mainIMUEMGStream(liveMode, classifier);
 end
 
 function printClassifierStatus
     fprintf('\nMYODRUM CLASSIFIERS\n');
     fprintf('  1. Rule based: available and under validation.\n');
-    fprintf(['  2. Machine learning: collect labelled data separately with ' ...
-        'calibrateMachineLearningDataset; live inference is future work.\n']);
-    fprintf('  3. Hybrid: reserved until both baselines are validated.\n\n');
+    fprintf(['  2. Machine learning: trained bagged trees available for ' ...
+        'four-channel IMU + EMG live play.\n']);
+    fprintf(['  3. Hybrid: rule and ML labels must agree; EMG remains ' ...
+        'mandatory.\n\n']);
 end

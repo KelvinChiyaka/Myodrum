@@ -52,7 +52,8 @@ exclusive ownership of the same COM port.
 
 ## Real-time synchronized fusion sessions
 
-`mainMyoDrum("imu-emg-stream")` writes `imuEmgStream.mat`. Every row is one
+`mainMyoDrum("imu-emg-4","rule-based","recording")` writes
+`imuEmgStream.mat`. Every row is one
 200 Hz firmware frame and contains `time_s`, `sequenceNumber`, `deviceStatus`,
 `frameValid`, both IMUs, `emgVoltage_V`, independently normalized
 `emgNormalized`, `imuCandidateHit`, `emgConfirmedHit`,
@@ -62,12 +63,20 @@ and active samples plus the per-channel normalization profile.
 
 The continuous file also includes `candidateTargetIndex`,
 `fusionAcceptedHit`, `fusionRejectedHit`, `fusionPendingActive`, and
-`fusionDecisionCode`. The `fusionEvents` table contains one row per IMU
+`fusionDecisionCode`. `hostProcessingLag_s` records how far MATLAB's live
+processing has fallen behind the newest serial data; it is relative to the
+first live batch and is intended for long-session latency diagnosis. The
+`fusionEvents` table contains one row per IMU
 candidate with candidate and decision timestamps, hand, proposed orientation
 label, initial and peak normalized EMG scores, acceptance, and decision reason.
 Code meanings are stored in session metadata. A recoverable checkpoint is
-written every `cfg.Logging.StreamCheckpointSeconds`; only the final save marks
-the session `completedNormally=true`.
+written every `cfg.Logging.StreamCheckpointSeconds` when finite. Live-play
+checkpoints are disabled by default because rewriting a growing MAT-file can
+delay audio and create a serial backlog. The complete session is saved when
+play stops; only the final save marks the session `completedNormally=true`.
+The selectable `"performance"` live mode does not allocate this continuous
+buffer or create `imuEmgStream.mat`; it retains only calibration and compact
+session metadata.
 
 `mainMyoDrum("emg")` writes `emgAcquisition.mat` beside the IMU session folders.
 Its variables are:
@@ -112,3 +121,10 @@ ground truth: inter-strike frames in a hit block are not themselves hits.
 Feature preparation must segment candidate movement windows inside the block
 before training. Training, validation, and test partitions must remain grouped
 by session or collection round.
+
+`extractMLFeatureDataset` writes `data/processed/machineLearning/
+mlFeatureDataset.mat` and `.csv`. Each row is one 0.30-second window containing
+axis statistics, acceleration/rotation magnitudes, jerk, angular acceleration,
+same-hand and opposite-hand normalized EMG summaries, starting gravity and
+peak-gyro direction. Identity and grouping columns are stored beside the
+features but are excluded from `featureMetadata.featureNames`.

@@ -29,6 +29,12 @@ function cfg = myoDrumConfig(projectRoot)
     % from the integrated heading. 1000 dps keeps sweeps unclipped; the
     % MPU6050 noise density is the same at every range.
     cfg.IMU.GyroscopeRangeDps = 1000;
+    % The binary stream reports each failed I2C transaction. Allow a small
+    % number of transient misses while still rejecting a genuinely unstable
+    % or disconnected sensor before audio starts.
+    cfg.IMU.StreamStartupSettleSeconds = 0.25;
+    cfg.IMU.StreamWarningValidFraction = 0.99;
+    cfg.IMU.StreamMinimumValidFraction = 0.95;
 
     cfg.Calibration.ForceSixPose = false;
     cfg.Calibration.ForceStatic = false;
@@ -69,10 +75,13 @@ function cfg = myoDrumConfig(projectRoot)
     cfg.Orientation.MaxWarmupSeconds = 12;
     cfg.Orientation.EstimatorVersion = "gravity-azimuth-1";
 
-    % A larger in-memory buffer avoids MAT-file writes in a normal session.
-    % The complete buffer is still flushed when the session is stopped.
-    cfg.Logging.BufferSamples = 5000;
-    cfg.Logging.StreamCheckpointSeconds = 30;
+    % Live samples are stored in a geometrically growing preallocated buffer.
+    % Saving the complete and continually growing session during play blocks
+    % the 200 Hz loop, so checkpoints are opt-in. The full session is always
+    % saved when the user stops normally.
+    % 120000 rows covers ten minutes at 200 Hz without even one resize.
+    cfg.Logging.BufferSamples = 120000;
+    cfg.Logging.StreamCheckpointSeconds = inf;
 
     % Keep plotting out of the live-play path. The dashboard helpers remain
     % available for offline diagnostics, but MATLAB graphics must not compete
@@ -176,7 +185,9 @@ function cfg = myoDrumConfig(projectRoot)
     cfg.Fusion.EMGLookbackSeconds = 0.18;
     cfg.Fusion.EMGConfirmationTimeoutSeconds = 0.12;
     cfg.Fusion.MinimumInterAcceptedHitSeconds = 0.28;
-    cfg.Fusion.RequiredActiveChannels = 1;
+    % Require agreement from both same-hand electrodes. A single floating,
+    % loose or motion-contaminated lead must never authorize an IMU hit.
+    cfg.Fusion.RequiredActiveChannels = 2;
 
     % Labelled collection for the first standalone machine-learning model.
     % Each round contains every hand/class combination. Hit blocks are ended
@@ -187,6 +198,22 @@ function cfg = myoDrumConfig(projectRoot)
     cfg.MachineLearning.HitsPerClassPerHandPerRound = 20;
     cfg.MachineLearning.NoHitMinimumSeconds = 10;
     cfg.MachineLearning.ScheduleVersion = "ml-blocks-1";
+    cfg.MachineLearning.FeatureVersion = "imu-emg-window-1";
+    cfg.MachineLearning.FeatureWindowPreSeconds = 0.20;
+    cfg.MachineLearning.FeatureWindowPostSeconds = 0.10;
+    cfg.MachineLearning.FeatureMinimumSeparationSeconds = 0.30;
+    cfg.MachineLearning.NoHitWindowsPerBlock = 20;
+    cfg.MachineLearning.BaggedTreeCount = 150;
+    cfg.MachineLearning.BaggedTreeMinLeafSize = 5;
+    cfg.MachineLearning.BaggedTreeMaxSplits = 100;
+    cfg.MachineLearning.ModelVersion = "bagged-trees-1";
+    % Live ML evaluates only IMU strike candidates. The model chooses the
+    % drum (or NO_HIT), while two healthy same-hand EMG channels remain a
+    % mandatory safety gate. These settings do not alter rule-based play.
+    cfg.MachineLearning.LiveMinimumConfidence = 0.50;
+    cfg.MachineLearning.LiveMinimumWindowFraction = 0.80;
+    cfg.MachineLearning.LiveBufferSeconds = 1.0;
+    cfg.MachineLearning.RequireEMGConfirmation = true;
 
     cfg.Paths.ProjectRoot = string(projectRoot);
     cfg.Paths.Audio = string(fullfile(projectRoot, 'audio'));

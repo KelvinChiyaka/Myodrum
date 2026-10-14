@@ -19,22 +19,25 @@ mainMyoDrum
 ```
 
 The public interfaces are IMU only, EMG only, synchronized IMU + four-channel
-EMG, and the reserved six-channel interface. Rule based classification is the
-current working implementation. Labelled machine-learning data collection is
-available separately; live ML inference, hybrid inference and the six-channel
-interface remain future stages.
+EMG, and the reserved six-channel interface. Four-channel live play supports
+rule-based, bagged-tree machine-learning and conservative hybrid classifiers.
+The six-channel interface remains a future stage.
 
 For repeatable testing the implemented modes can be started directly:
 
 ```matlab
 mainMyoDrum("imu-only", "rule-based")
 mainMyoDrum("emg-only")
-mainMyoDrum("imu-emg-4", "rule-based")
+mainMyoDrum("imu-emg-4", "rule-based", "performance")
+mainMyoDrum("imu-emg-4", "machine-learning", "performance")
+mainMyoDrum("imu-emg-4", "hybrid", "performance")
 ```
 
-Machine-learning collection is a separate calibration workflow. The machine-
-learning menu choice will become live inference only after a trained model has
-been validated and saved.
+Machine-learning collection remains a separate calibration workflow. Live ML
+loads `data/models/machineLearning/myoDrumBaggedTrees.mat`, applies the same
+60-feature window used for training and requires two healthy same-hand EMG
+channels. Hybrid mode additionally requires the rule-based and ML drum labels
+to agree before audio is played.
 
 ## Current working baseline
 

@@ -100,6 +100,26 @@ function testProjectExposesCombinedMode(testCase)
         'MyoDrumIMUEMGStream', 'MyoDrumIMUEMGStream.ino')));
 end
 
+function testNoHitPredictionCannotBreakTargetLogging(testCase)
+    source = fileread(fullfile(testCase.TestData.Root, 'drumRunTests', ...
+        'combined', 'mainIMUEMGStream.m'));
+    verifyNotEmpty(testCase, regexp(source, ...
+        'if ~isempty\(match\)', 'once'));
+    verifyNotEmpty(testCase, regexp(source, ...
+        'candidateTargetIndex\(hand\) = uint8\(match\)', 'once'));
+end
+
+function testStartupHealthCheckReportsPerSensorAndAllowsTransients(testCase)
+    cfg = myoDrumConfig(testCase.TestData.Root);
+    verifyEqual(testCase, cfg.IMU.StreamMinimumValidFraction, 0.95, ...
+        'AbsTol', 1e-12);
+    source = fileread(fullfile(testCase.TestData.Root, 'drumRunTests', ...
+        'combined', 'mainIMUEMGStream.m'));
+    verifyNotEmpty(testCase, regexp(source, 'ValidFrames_pct', 'once'));
+    verifyNotEmpty(testCase, regexp(source, ...
+        'StreamStartupSettleSeconds', 'once'));
+end
+
 function packet = makePacket(sequence,timestamp,imu1,imu2,adc,status)
     packet=zeros(47,1,'uint8'); packet(1:3)=uint8([165;90;1]);
     packet(4:5)=littleEndian(sequence,2); packet(6:9)=littleEndian(timestamp,4);

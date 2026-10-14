@@ -14,7 +14,7 @@ end
 function testImmediateConfirmation(testCase)
     state=initializeFusionClassifier;
     [~,decision,events]=step(state,0,true(1,2),["KICK","SNARE"], ...
-        [0.4 0.1 0.1 0.5],testCase);
+        [0.4 0.3 0.3 0.5],testCase);
     verifyEqual(testCase,decision.accepted,true(1,2));
     verifyEqual(testCase,[events.accepted],true(1,2));
     verifyEqual(testCase,string({events.reason}),["ACCEPTED","ACCEPTED"]);
@@ -26,9 +26,21 @@ function testDelayedConfirmationAndLatency(testCase)
         zeros(1,4),testCase);
     verifyFalse(testCase,any(decision.accepted)); verifyEmpty(testCase,events);
     [~,decision,events]=step(state,1.055,false(1,2),strings(1,2), ...
-        [0.3 0 0 0],testCase);
+        [0.3 0.25 0 0],testCase);
     verifyTrue(testCase,decision.accepted(1));
     verifyEqual(testCase,events.decisionLatency_s,0.055,'AbsTol',1e-12);
+end
+
+function testSingleChannelCannotConfirmHit(testCase)
+    state=initializeFusionClassifier;
+    [state,decision,events]=step(state,0,[true false],["KICK",""], ...
+        [1 0 0 0],testCase);
+    verifyFalse(testCase,any(decision.accepted));
+    verifyEmpty(testCase,events);
+    [~,decision,events]=step(state,0.121,false(1,2),strings(1,2), ...
+        [1 0 0 0],testCase);
+    verifyTrue(testCase,decision.rejected(1));
+    verifyEqual(testCase,events.reason,"EMG_TIMEOUT");
 end
 
 function testTimeoutAndUncertainOrientation(testCase)

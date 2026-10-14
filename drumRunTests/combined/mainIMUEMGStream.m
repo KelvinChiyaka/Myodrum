@@ -1,5 +1,10 @@
-function mainIMUEMGStream
+function mainIMUEMGStream(liveMode, classifierMode)
 % MAINIMUEMGSTREAM Synchronized 200 Hz IMU drum selection + EMG confirmation.
+
+    arguments
+        liveMode (1,1) string = "prompt"
+        classifierMode (1,1) string = "rule-based"
+    end
 
     clc;
     root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
@@ -7,8 +12,24 @@ function mainIMUEMGStream
     addpath(fullfile(root, 'IMU_subsystem'));
     addpath(fullfile(root, 'EMG_subsystem'));
     addpath(fullfile(root, 'classifiers', 'ruleBased'));
+    addpath(fullfile(root, 'classifiers', 'machineLearning'));
     addpath(fullfile(root, 'audio'));
     cfg = myoDrumConfig(root);
+    classifierMode = lower(strtrim(classifierMode));
+    if ~ismember(classifierMode, ...
+            ["rule-based", "machine-learning", "hybrid"])
+        error('MyoDrum:UnsupportedLiveClassifier', ...
+            ['Live classifier must be rule-based, machine-learning ' ...
+             'or hybrid.']);
+    end
+    if classifierMode ~= "rule-based"
+        mlClassifier = initializeLiveMLClassifier(string(root), cfg, ...
+            ClassifierMode=classifierMode);
+    else
+        mlClassifier = struct;
+    end
+    liveMode = selectLiveMode(liveMode);
+    recordLiveData = liveMode == "recording";
     [accelCalibration, directions, regionModel] = loadCalibrations(cfg);
 
     sessionId = "session_" + string(datetime('now', ...
@@ -22,8 +43,15 @@ function mainIMUEMGStream
     metadata.sessionId = sessionId;
     metadata.startedAt = startedAt;
     metadata.mode = "imu-emg-stream";
+    metadata.classifierMode = classifierMode;
     metadata.config = cfg;
-    metadata.rawDataFile = string(rawFile);
+    if recordLiveData
+        metadata.rawDataFile = string(rawFile);
+    else
+        metadata.rawDataFile = "";
+    end
+    metadata.liveMode = liveMode;
+    metadata.liveRecordingEnabled = recordLiveData;
     metadata.completedNormally = false;
     metadata.timestampSource = ...
         "Arduino micros() shared by both IMUs and all EMG channels";
@@ -31,6 +59,12 @@ function mainIMUEMGStream
 
     fprintf('MyoDrum: synchronized dual-IMU + EMG stream\n');
     fprintf('Session: %s\n', sessionId);
+    fprintf('Classifier: %s\n', upper(classifierMode));
+    if recordLiveData
+        fprintf('Live mode: RESEARCH RECORDING (continuous data retained).\n');
+    else
+        fprintf('Live mode: PERFORMANCE (no continuous live data recording).\n');
+    end
     fprintf(['Firmware target: %.0f complete synchronized frames/s.\n' ...
         'Upload firmware/MyoDrumIMUEMGStream first.\n'], ...
         cfg.EMG.CombinedStreamRateHz);
@@ -41,6 +75,8 @@ function mainIMUEMGStream
     fprintf('\nREST/BIAS CALIBRATION\n');
     input('Keep both sticks and all muscles relaxed, then press Enter...', 's');
     reader.start();
+    pause(cfg.IMU.StreamStartupSettleSeconds);
+    discardPendingFrames(reader, cfg);
     restFrames = collectForSeconds(reader, max(3, cfg.EMG.RestSeconds), cfg);
     ensureHealthyFrames(restFrames, cfg);
     gyroBiasDps = zeros(2, 3);
@@ -123,7 +159,7 @@ function mainIMUEMGStream
     detectors = [initializeKickDetector, initializeKickDetector];
     banks = createDrumPlayerBanks(cfg.Paths.Audio, cfg.Targets.Names, ...
         cfg.Targets.AudioFiles, cfg.Kick.AudioVoices);
-    showDashboard = cfg.Visualization.Enabled;
+    showDashboard = cfg.Visualization.Enabled && recordLiveData;
     if showDashboard
         dashboard = createLiveSensorDashboard(cfg);
         fig = dashboard.Figure;
@@ -133,7 +169,11 @@ function mainIMUEMGStream
     end
     cleanupFigure = onCleanup(@()closeFigure(fig));
 
-    log = emptyLog;
+    if recordLiveData
+        liveLog = initializeIMUEMGLiveLog(cfg.Logging.BufferSamples);
+    else
+        liveLog = struct;
+    end
     activeRegion = strings(1, 2);
     armedRegion = strings(1, 2);
     armGravity = nan(2, 3);
@@ -143,18 +183,40 @@ function mainIMUEMGStream
     lastRailTime_s = -inf(1, numel(cfg.EMG.ChannelNames));
     runtimeFaultReported = false(1, numel(cfg.EMG.ChannelNames));
     fusionEventCells = cell(0, 1);
+    candidateCount = zeros(1, 2);
+    acceptedCount = zeros(1, 2);
+    rejectedCount = zeros(1, 2);
     lastCheckpointTime = -inf;
     lastDashboardTime = -inf;
     displayLabels = strings(1, 2);
     displayScores = zeros(1, 2);
     discardPendingFrames(reader, cfg);
-    fprintf(['\nREADY. IMU selects the drum; independently normalized EMG ' ...
-        'confirms each hit. Press Q or close the window to stop.\n\n']);
+    runtimeClock = tic;
+    hostTimeOffset_s = NaN;
+    lastFrameTime_s = NaN;
+    if classifierMode == "machine-learning"
+        fprintf(['\nREADY. ML selects KICK, SNARE, CRASH or NO_HIT; both ' ...
+            'same-hand EMG channels must confirm sound. Press Q or close ' ...
+            'the window to stop.\n\n']);
+    elseif classifierMode == "hybrid"
+        fprintf(['\nREADY. Rule-based and ML drum labels must agree, and ' ...
+            'both same-hand EMG channels must confirm sound. Press Q or ' ...
+            'close the window to stop.\n\n']);
+    else
+        fprintf(['\nREADY. IMU selects the drum; both same-hand EMG channels ' ...
+            'must confirm each hit. Press Q or close the window to stop.\n\n']);
+    end
 
     while isgraphics(fig) && getappdata(fig, 'MyoDrumRunning')
         frames = reader.readAvailableFrames();
         if isempty(frames.sequence)
             pause(0.001); drawnow limitrate; continue;
+        end
+        batchHostTime_s = toc(runtimeClock);
+        if isnan(hostTimeOffset_s)
+            % The newest frame in the first live batch defines zero host
+            % backlog. Later values expose serial/processing delay directly.
+            hostTimeOffset_s = batchHostTime_s - frames.time_s(end);
         end
         volts = adcToVolts(frames.emgAdc, cfg);
         for row = 1:numel(frames.sequence)
@@ -228,10 +290,20 @@ function mainIMUEMGStream
                 correctedGyro(1, :, hand) = gyro;
                 ypr(1, :, hand) = estimators{hand}.Features();
             end
-            [fusion, decision, events] = updateFusionClassifier( ...
-                fusion, frames.time_s(row), candidateHit, ...
-                candidateLabels, normalizedEMG, cfg.EMG.Hands, ...
-                runtimeValid(:), cfg.Fusion);
+            if classifierMode ~= "rule-based"
+                ruleCandidateLabels = candidateLabels;
+                [mlClassifier, decision, events] = ...
+                    updateLiveMLClassifier(mlClassifier, ...
+                    frames.time_s(row), calibratedAccel, correctedGyro, ...
+                    normalizedEMG, frames.frameValid(row,:), ...
+                    runtimeValid, candidateHit, cfg, ruleCandidateLabels);
+                candidateLabels = decision.labels;
+            else
+                [fusion, decision, events] = updateFusionClassifier( ...
+                    fusion, frames.time_s(row), candidateHit, ...
+                    candidateLabels, normalizedEMG, cfg.EMG.Hands, ...
+                    runtimeValid(:), cfg.Fusion);
+            end
             displayScores = decision.emgScore;
             for hand = 1:2
                 if candidateLabels(hand) ~= ""
@@ -242,17 +314,28 @@ function mainIMUEMGStream
             candidateTargetIndex = zeros(1, 2, 'uint8');
             for hand = 1:2
                 if candidateLabels(hand) ~= ""
-                    candidateTargetIndex(hand) = uint8(find( ...
-                        cfg.Targets.Names == candidateLabels(hand), 1));
+                    match = find(cfg.Targets.Names == ...
+                        candidateLabels(hand), 1);
+                    if ~isempty(match)
+                        candidateTargetIndex(hand) = uint8(match);
+                    end
                 end
                 if decision.accepted(hand) && decision.labels(hand) ~= ""
-                    targetIndex(hand) = uint8(find( ...
-                        cfg.Targets.Names == decision.labels(hand), 1));
+                    match = find(cfg.Targets.Names == ...
+                        decision.labels(hand), 1);
+                    if ~isempty(match)
+                        targetIndex(hand) = uint8(match);
+                    end
                 end
             end
             for eventIndex = 1:numel(events)
-                fusionEventCells{end+1,1} = events(eventIndex); %#ok<AGROW>
+                if recordLiveData
+                    fusionEventCells{end+1,1} = events(eventIndex); %#ok<AGROW>
+                end
             end
+            candidateCount = candidateCount + double(candidateHit);
+            acceptedCount = acceptedCount + double(decision.accepted);
+            rejectedCount = rejectedCount + double(decision.rejected);
             % Play once per accepted hand. Do not collapse equal labels: a
             % simultaneous KICK from both sticks must use two audio voices.
             for hand = 1:2
@@ -264,61 +347,163 @@ function mainIMUEMGStream
             % feedback can never delay an accepted hit's sound trigger.
             if cfg.Runtime.PrintHitEvents
                 for eventIndex = 1:numel(events)
-                    fprintf('%s %s | %s | EMG %.2f | latency %.0f ms\n', ...
-                        cfg.IMU.HandNames(events(eventIndex).handIndex), ...
-                        events(eventIndex).orientationLabel, ...
-                        events(eventIndex).reason, ...
-                        events(eventIndex).peakEMGScore, ...
-                        1000 * events(eventIndex).decisionLatency_s);
+                    if classifierMode == "hybrid"
+                        fprintf(['%s RULE %s + ML %s | %s | ML %.2f | ' ...
+                            'EMG %.2f | latency %.0f ms\n'], ...
+                            cfg.IMU.HandNames(events(eventIndex).handIndex), ...
+                            events(eventIndex).ruleLabel, ...
+                            events(eventIndex).mlLabel, ...
+                            events(eventIndex).reason, ...
+                            events(eventIndex).mlConfidence, ...
+                            events(eventIndex).peakEMGScore, ...
+                            1000 * events(eventIndex).decisionLatency_s);
+                    elseif classifierMode == "machine-learning"
+                        fprintf(['%s %s | %s | ML %.2f | EMG %.2f | ' ...
+                            'latency %.0f ms\n'], ...
+                            cfg.IMU.HandNames(events(eventIndex).handIndex), ...
+                            events(eventIndex).orientationLabel, ...
+                            events(eventIndex).reason, ...
+                            events(eventIndex).mlConfidence, ...
+                            events(eventIndex).peakEMGScore, ...
+                            1000 * events(eventIndex).decisionLatency_s);
+                    else
+                        fprintf('%s %s | %s | EMG %.2f | latency %.0f ms\n', ...
+                            cfg.IMU.HandNames(events(eventIndex).handIndex), ...
+                            events(eventIndex).orientationLabel, ...
+                            events(eventIndex).reason, ...
+                            events(eventIndex).peakEMGScore, ...
+                            1000 * events(eventIndex).decisionLatency_s);
+                    end
                 end
             end
-            log = appendLog(log, frames, row, rawAccel, calibratedAccel, ...
-                correctedGyro, ypr, volts(row, :), profile, candidateHit, ...
-                decision, candidateTargetIndex, targetIndex, runtimeValid);
+            if recordLiveData
+                hostProcessingLag_s = max(0, toc(runtimeClock) - ...
+                    frames.time_s(row) - hostTimeOffset_s);
+                liveLog = appendIMUEMGLiveLog(liveLog, frames, row, ...
+                    rawAccel, calibratedAccel, correctedGyro, ypr, ...
+                    volts(row, :), normalizedEMG, candidateHit, decision, ...
+                    candidateTargetIndex, targetIndex, runtimeValid, ...
+                    hostProcessingLag_s);
+            end
         end
-        if showDashboard && ~isempty(log.time_s) && ...
-                log.time_s(end) - lastDashboardTime >= ...
+        currentTime_s = frames.time_s(end);
+        lastFrameTime_s = currentTime_s;
+        if showDashboard && recordLiveData && liveLog.sampleCount > 0 && ...
+                currentTime_s - lastDashboardTime >= ...
                 1 / cfg.Visualization.RefreshRateHz
-            updateLiveSensorDashboard(dashboard, log, cfg, ...
+            dashboardRows = max(cfg.Visualization.MaximumPoints, ...
+                ceil(1.25 * cfg.Visualization.WindowSeconds * ...
+                cfg.EMG.CombinedStreamRateHz));
+            firstDashboardRow = max(1, ...
+                liveLog.sampleCount-dashboardRows+1);
+            dashboardLog = snapshotIMUEMGLiveLog(liveLog, ...
+                firstDashboardRow:liveLog.sampleCount);
+            updateLiveSensorDashboard(dashboard, dashboardLog, cfg, ...
                 displayLabels, displayScores);
-            lastDashboardTime = log.time_s(end);
+            lastDashboardTime = currentTime_s;
         elseif ~showDashboard
             drawnow limitrate;
         end
-        if ~isempty(log.time_s) && log.time_s(end)-lastCheckpointTime >= ...
+        if recordLiveData && isfinite(cfg.Logging.StreamCheckpointSeconds) && ...
+                liveLog.sampleCount > 0 && ...
+                currentTime_s-lastCheckpointTime >= ...
                 cfg.Logging.StreamCheckpointSeconds
-            checkpoint = log;
+            checkpoint = snapshotIMUEMGLiveLog(liveLog);
             checkpoint.fusionEvents = eventsToTable(fusionEventCells);
             save(rawFile, '-struct', 'checkpoint', '-v7.3');
-            metadata.loggedSamples = numel(log.time_s);
-            metadata.lastCheckpointTime_s = log.time_s(end);
+            metadata.loggedSamples = liveLog.sampleCount;
+            metadata.lastCheckpointTime_s = currentTime_s;
             metadata.emgProfile = profile;
             metadata.completedNormally = false;
             save(metadataFile, 'metadata');
-            lastCheckpointTime = log.time_s(end);
+            lastCheckpointTime = currentTime_s;
         end
     end
-    if ~isempty(log.time_s)
+    if isfinite(lastFrameTime_s) && classifierMode == "rule-based"
         [fusion, ~, finalEvents] = updateFusionClassifier(fusion, ...
-            log.time_s(end)+cfg.Fusion.EMGConfirmationTimeoutSeconds+eps, ...
+            lastFrameTime_s+ ...
+            cfg.Fusion.EMGConfirmationTimeoutSeconds+eps, ...
             false(1,2), strings(1,2), zeros(1,4), cfg.EMG.Hands, ...
             profile.validChannel(:), cfg.Fusion); %#ok<ASGLU>
         for eventIndex = 1:numel(finalEvents)
-            fusionEventCells{end+1,1} = finalEvents(eventIndex); %#ok<AGROW>
+            hand = double(finalEvents(eventIndex).handIndex);
+            if finalEvents(eventIndex).accepted
+                acceptedCount(hand) = acceptedCount(hand) + 1;
+            else
+                rejectedCount(hand) = rejectedCount(hand) + 1;
+            end
+            if recordLiveData
+                fusionEventCells{end+1,1} = finalEvents(eventIndex); %#ok<AGROW>
+            end
         end
     end
     reader.stop();
     statistics = reader.getStatistics();
-    log.fusionEvents = eventsToTable(fusionEventCells);
-    metadata = createMetadata(sessionId, startedAt, cfg, rawFile, profile, ...
-        gyroBiasDps, statistics, log);
-    save(rawFile, '-struct', 'log', '-v7.3');
+    if recordLiveData
+        log = snapshotIMUEMGLiveLog(liveLog);
+        log.fusionEvents = eventsToTable(fusionEventCells);
+        metadata = createMetadata(sessionId, startedAt, cfg, rawFile, ...
+            profile, gyroBiasDps, statistics, log);
+        metadata.classifierMode = classifierMode;
+        metadata.liveMode = liveMode;
+        metadata.liveRecordingEnabled = true;
+        save(rawFile, '-struct', 'log', '-v7.3');
+    else
+        metadata.endedAt = string(datetime('now','TimeZone','local'));
+        metadata.emgProfile = profile;
+        metadata.gyroBiasDps = gyroBiasDps;
+        metadata.streamStatistics = statistics;
+        metadata.loggedSamples = 0;
+        metadata.candidateHitCount = candidateCount;
+        metadata.confirmedHitCount = acceptedCount;
+        metadata.rejectedHitCount = rejectedCount;
+        metadata.completedNormally = true;
+        metadata.classifierMode = classifierMode;
+    end
     save(metadataFile, 'metadata');
-    fprintf(['\nSaved %d synchronized frames at %.2f Hz; dropped %d, ' ...
-        'CRC failures %d.\nRaw data:\n  %s\n'], ...
-        numel(log.time_s), statistics.measuredRateHz, ...
-        statistics.droppedFrames, statistics.checksumFailures, rawFile);
+    if recordLiveData
+        fprintf(['\nSaved %d synchronized frames at %.2f Hz; dropped %d, ' ...
+            'CRC failures %d.\nHost processing lag median/p95/max: ' ...
+            '%.1f / %.1f / %.1f ms.\nRaw data:\n  %s\n'], ...
+            numel(log.time_s), statistics.measuredRateHz, ...
+            statistics.droppedFrames, statistics.checksumFailures, ...
+            1000 * median(log.hostProcessingLag_s, 'omitnan'), ...
+            1000 * prctile(log.hostProcessingLag_s, 95), ...
+            1000 * max(log.hostProcessingLag_s, [], 'omitnan'), rawFile);
+    else
+        fprintf(['\nPerformance session stopped. No continuous live sensor ' ...
+            'recording was created. Stream %.2f Hz; dropped %d, CRC ' ...
+            'failures %d.\nSession metadata:\n  %s\n'], ...
+            statistics.measuredRateHz, statistics.droppedFrames, ...
+            statistics.checksumFailures, metadataFile);
+    end
     clear cleanupFigure cleanupReader;
+end
+
+function mode = selectLiveMode(mode)
+    mode = lower(strtrim(mode));
+    if mode == "prompt"
+        fprintf('\nSelect the live session mode:\n');
+        fprintf('  1. Performance (no continuous recording) [recommended]\n');
+        fprintf('  2. Research recording (save all IMU and EMG frames)\n');
+        choice = input('Selection: ');
+        if ~isscalar(choice) || ~isnumeric(choice) || ~isfinite(choice) || ...
+                choice ~= fix(choice) || choice < 1 || choice > 2
+            error('MyoDrum:InvalidLiveModeSelection', ...
+                'Enter either 1 for performance or 2 for recording.');
+        end
+        modes = ["performance", "recording"];
+        mode = modes(choice);
+    end
+    switch mode
+        case {"performance", "play", "no-recording"}
+            mode = "performance";
+        case {"recording", "research", "record"}
+            mode = "recording";
+        otherwise
+            error('MyoDrum:UnknownLiveMode', ...
+                'Unknown live session mode "%s".', mode);
+    end
 end
 
 function result = eventsToTable(eventCells)
@@ -426,9 +611,26 @@ function ensureHealthyFrames(frames, cfg)
         error('MyoDrum:InsufficientCombinedFrames', ...
             'Too few valid synchronized frames arrived.');
     end
-    if any(mean(frames.frameValid,1) < 0.99)
+    validFraction = mean(frames.frameValid,1);
+    failedFrames = sum(~frames.frameValid,1);
+    disp(table(cfg.IMU.HandNames(:), cfg.IMU.Addresses(:), ...
+        (100*validFraction(:)), failedFrames(:), ...
+        'VariableNames', {'Hand','Address','ValidFrames_pct', ...
+        'FailedFrames'}));
+    if any(validFraction < cfg.IMU.StreamMinimumValidFraction)
+        failed = validFraction < cfg.IMU.StreamMinimumValidFraction;
+        details = cfg.IMU.HandNames(failed) + " " + ...
+            cfg.IMU.Addresses(failed) + "=" + ...
+            compose('%.1f%%',100*validFraction(failed));
         error('MyoDrum:CombinedIMUReadFailures', ...
-            'At least one MPU6050 failed more than 1%% of stream reads.');
+            ['MPU stream reliability is below %.0f%%: %s. Physical ' ...
+             'connection can be present while I2C transactions fail; ' ...
+             'check SDA/SCL length, pull-ups, power and address wiring.'], ...
+            100*cfg.IMU.StreamMinimumValidFraction, strjoin(details, ', '));
+    elseif any(validFraction < cfg.IMU.StreamWarningValidFraction)
+        warning('MyoDrum:IntermittentIMUReadFailures', ...
+            ['One or more MPUs had intermittent startup read failures. ' ...
+             'Live processing will discard those isolated frames.']);
     end
 end
 
@@ -468,55 +670,6 @@ function banks = playLabel(banks, label)
     banks.(field).nextVoice = mod(voice, numel(banks.(field).players)) + 1;
 end
 
-function log = emptyLog
-    log.time_s=zeros(0,1); log.sequenceNumber=zeros(0,1,'uint16');
-    log.deviceStatus=zeros(0,1,'uint8'); log.frameValid=false(0,2);
-    log.accelRaw_g=zeros(0,3,2); log.accelCalibrated_g=zeros(0,3,2);
-    log.gyroCorrected_rad_s=zeros(0,3,2); log.temperature_C=zeros(0,2);
-    log.yawPitchRoll_deg=zeros(0,3,2); log.emgVoltage_V=zeros(0,4);
-    log.emgNormalized=zeros(0,4); log.imuCandidateHit=false(0,2);
-    log.emgConfirmedHit=false(0,2); log.fusionAcceptedHit=false(0,2);
-    log.fusionRejectedHit=false(0,2); log.fusionPendingActive=false(0,2);
-    log.emgConfirmationScore=zeros(0,2);
-    log.emgRuntimeValid=false(0,4);
-    log.fusionDecisionCode=zeros(0,2,'uint8');
-    log.candidateTargetIndex=zeros(0,2,'uint8');
-    log.targetIndex=zeros(0,2,'uint8');
-end
-
-function log = appendLog(log, frames, row, raw, calibrated, gyro, ypr, ...
-        volts, profile, candidate, decision, candidateTarget, target, ...
-        runtimeValid)
-    at = numel(log.time_s) + 1;
-    log.time_s(at,1)=frames.time_s(row); log.sequenceNumber(at,1)=frames.sequence(row);
-    log.deviceStatus(at,1)=frames.status(row); log.frameValid(at,:)=frames.frameValid(row,:);
-    log.accelRaw_g(at,:,:)=raw; log.accelCalibrated_g(at,:,:)=calibrated;
-    log.gyroCorrected_rad_s(at,:,:)=gyro;
-    log.temperature_C(at,:)=frames.temperatureC(row,:); log.yawPitchRoll_deg(at,:,:)=ypr;
-    log.emgVoltage_V(at,:)=volts;
-    log.emgNormalized(at,:)=max(0,(volts-profile.baseline_V)./profile.activeSpan_V);
-    log.imuCandidateHit(at,:)=candidate;
-    log.emgConfirmedHit(at,:)=decision.accepted;
-    log.fusionAcceptedHit(at,:)=decision.accepted;
-    log.fusionRejectedHit(at,:)=decision.rejected;
-    log.fusionPendingActive(at,:)=decision.pendingActive;
-    log.emgConfirmationScore(at,:)=decision.emgScore;
-    log.emgRuntimeValid(at,:)=runtimeValid;
-    log.fusionDecisionCode(at,:)=decisionCodes(decision);
-    log.candidateTargetIndex(at,:)=candidateTarget;
-    log.targetIndex(at,:)=target;
-end
-
-function codes = decisionCodes(decision)
-    codes = zeros(1,2,'uint8');
-    reasons = ["ACCEPTED", "EMG_TIMEOUT", "UNCERTAIN_ORIENTATION", ...
-        "DUPLICATE_GUARD", "PENDING_ALREADY_ACTIVE"];
-    for hand = 1:2
-        match = find(reasons == decision.reason(hand), 1);
-        if ~isempty(match), codes(hand) = uint8(match); end
-    end
-end
-
 function metadata = createMetadata(id,startedAt,cfg,file,profile,bias,stats,log)
     metadata.sessionId=id; metadata.startedAt=startedAt;
     metadata.endedAt=string(datetime('now','TimeZone','local'));
@@ -527,6 +680,12 @@ function metadata = createMetadata(id,startedAt,cfg,file,profile,bias,stats,log)
     metadata.candidateHitCount=sum(log.imuCandidateHit,1);
     metadata.confirmedHitCount=sum(log.fusionAcceptedHit,1);
     metadata.rejectedHitCount=sum(log.fusionRejectedHit,1);
+    metadata.hostProcessingLagMedian_s=median( ...
+        log.hostProcessingLag_s,'omitnan');
+    metadata.hostProcessingLagP95_s=prctile( ...
+        log.hostProcessingLag_s,95);
+    metadata.hostProcessingLagMaximum_s=max( ...
+        log.hostProcessingLag_s,[],'omitnan');
     metadata.fusionDecisionCodes=struct('none',uint8(0), ...
         'accepted',uint8(1),'emgTimeout',uint8(2), ...
         'uncertainOrientation',uint8(3),'duplicateGuard',uint8(4), ...
