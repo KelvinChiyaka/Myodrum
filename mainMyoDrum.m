@@ -39,10 +39,7 @@ function mainMyoDrum(mode, classifier, liveMode)
         case "imu-emg-4"
             runFourChannelFusion(root, liveMode, classifier);
         case "imu-emg-6"
-            error('MyoDrum:NotImplemented', [ ...
-                'Six-channel IMU + EMG is reserved for the next hardware ' ...
-                'stage. Its pins, packet protocol and electrode map have ' ...
-                'not yet been defined.']);
+            runLeftThreeChannelFusion(root, liveMode, classifier);
         otherwise
             error('MyoDrum:UnknownMode', 'Unknown interface "%s".', mode);
     end
@@ -54,7 +51,7 @@ function mode = promptForInterface(cfg)
     fprintf('  1. IMU only\n');
     fprintf('  2. EMG only (four channels)\n');
     fprintf('  3. IMU + EMG (four channels)\n');
-    fprintf('  4. IMU + EMG (six channels) [future]\n');
+    fprintf('  4. Left stick + 3 EMG channels (six electrodes)\n');
     fprintf('  5. Classifier status\n');
     fprintf('  0. Exit\n');
     choice = input('Selection: ');
@@ -159,6 +156,17 @@ function runFourChannelFusion(root, liveMode, classifier)
     addpath(fullfile(root, 'drumRunTests', 'combined'));
     addpath(fullfile(root, 'classifiers', 'machineLearning'));
     mainIMUEMGStream(liveMode, classifier);
+end
+
+function runLeftThreeChannelFusion(root, liveMode, classifier)
+    addpath(fullfile(root, 'IMU_subsystem'));
+    addpath(fullfile(root, 'EMG_subsystem'));
+    addpath(fullfile(root, 'classifiers', 'ruleBased'));
+    addpath(fullfile(root, 'calibration'));
+    addpath(fullfile(root, 'audio'));
+    addpath(fullfile(root, 'drumRunTests', 'combined'));
+    addpath(fullfile(root, 'classifiers', 'machineLearning'));
+    mainIMUEMGStream(liveMode, classifier, "left-three-emg");
 end
 
 function printClassifierStatus

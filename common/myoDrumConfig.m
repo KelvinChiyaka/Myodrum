@@ -1,4 +1,4 @@
-function cfg = myoDrumConfig(projectRoot)
+function cfg = myoDrumConfig(projectRoot, sensorProfile)
 % MYODRUMCONFIG Return the shared MyoDrum hardware and experiment settings.
 %
 % Keep settings used by more than one subsystem here. Hardware-specific
@@ -7,6 +7,9 @@ function cfg = myoDrumConfig(projectRoot)
 
     if nargin < 1 || strlength(string(projectRoot)) == 0
         projectRoot = fileparts(fileparts(mfilename('fullpath')));
+    end
+    if nargin < 2 || strlength(string(sensorProfile)) == 0
+        sensorProfile = "four-channel";
     end
     projectRoot = char(projectRoot);
 
@@ -19,6 +22,7 @@ function cfg = myoDrumConfig(projectRoot)
 
     cfg.IMU.Addresses = ["0x68", "0x69"];
     cfg.IMU.HandNames = ["LEFT", "RIGHT"];
+    cfg.IMU.ActiveHandIndices = [1, 2];
     % A faster internal update and lower-latency DLPF ensure each slow
     % MATLAB/I2C transaction receives the freshest available motion frame.
     cfg.IMU.SensorOutputRateHz = 100;
@@ -146,6 +150,7 @@ function cfg = myoDrumConfig(projectRoot)
     cfg.EMG.ChannelNames = ["LEFT_FOREARM"; "LEFT_TRICEPS"; ...
         "RIGHT_FOREARM"; "RIGHT_TRICEPS"];
     cfg.EMG.Hands = ["LEFT"; "LEFT"; "RIGHT"; "RIGHT"];
+    cfg.EMG.ActiveChannelMask = true(4,1);
     cfg.EMG.RestSeconds = 5;
     cfg.EMG.PreflightSeconds = 2;
     cfg.EMG.LiveWindowSeconds = 15;
@@ -207,6 +212,9 @@ function cfg = myoDrumConfig(projectRoot)
     cfg.MachineLearning.BaggedTreeMinLeafSize = 5;
     cfg.MachineLearning.BaggedTreeMaxSplits = 100;
     cfg.MachineLearning.ModelVersion = "bagged-trees-1";
+    cfg.MachineLearning.DataFolderName = "machineLearning";
+    cfg.MachineLearning.ModelFolderName = "machineLearning";
+    cfg.MachineLearning.ModelFileName = "myoDrumBaggedTrees.mat";
     % Live ML evaluates only IMU strike candidates. The model chooses the
     % drum (or NO_HIT), while two healthy same-hand EMG channels remain a
     % mandatory safety gate. These settings do not alter rule-based play.
@@ -222,4 +230,31 @@ function cfg = myoDrumConfig(projectRoot)
     cfg.Paths.ProcessedData = string(fullfile(projectRoot, 'data', 'processed'));
     cfg.Paths.Metadata = string(fullfile(projectRoot, 'data', 'metadata'));
     cfg.Paths.Models = string(fullfile(projectRoot, 'data', 'models'));
+
+    sensorProfile = lower(strtrim(string(sensorProfile)));
+    switch sensorProfile
+        case {"four-channel", "four", "dual"}
+            cfg.Runtime.SensorProfile = "four-channel";
+        case {"left-three-emg", "left-only", "six-electrode"}
+            % Three bipolar EMG channels use six sensing electrodes on the
+            % left arm. The fourth ADC position remains in the established
+            % binary packet so the proven 200 Hz firmware does not change.
+            cfg.Runtime.SensorProfile = "left-three-emg";
+            cfg.IMU.ActiveHandIndices = 1;
+            cfg.EMG.AnalogPins = ["A0"; "A1"; "A2"; "A4"];
+            cfg.EMG.ChannelNames = ["LEFT_BRACHIORADIALIS"; ...
+                "LEFT_TRICEPS"; "LEFT_ECRL"; "UNUSED_A4"];
+            cfg.EMG.Hands = ["LEFT"; "LEFT"; "LEFT"; "UNUSED"];
+            cfg.EMG.ActiveChannelMask = [true; true; true; false];
+            cfg.Fusion.RequiredActiveChannels = 2;
+            cfg.MachineLearning.FeatureVersion = "imu-left3-emg-window-1";
+            cfg.MachineLearning.ModelVersion = "left3-bagged-trees-1";
+            cfg.MachineLearning.DataFolderName = "machineLearningLeft3";
+            cfg.MachineLearning.ModelFolderName = "machineLearningLeft3";
+            cfg.MachineLearning.ModelFileName = ...
+                "myoDrumLeft3BaggedTrees.mat";
+        otherwise
+            error('MyoDrum:UnknownSensorProfile', ...
+                'Unknown sensor profile "%s".', sensorProfile);
+    end
 end

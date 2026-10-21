@@ -14,7 +14,8 @@ function state = initializeLiveMLClassifier(projectRoot, cfg, options)
     end
     if options.ModelFile == ""
         modelFile = fullfile(projectRoot, 'data', 'models', ...
-            'machineLearning', 'myoDrumBaggedTrees.mat');
+            cfg.MachineLearning.ModelFolderName, ...
+            cfg.MachineLearning.ModelFileName);
     else
         modelFile = options.ModelFile;
     end
@@ -40,6 +41,12 @@ function state = initializeLiveMLClassifier(projectRoot, cfg, options)
             'Model feature version %s does not match runtime version %s.', ...
             artifact.featureVersion, cfg.MachineLearning.FeatureVersion);
     end
+    if isfield(artifact, 'sensorProfile') && ...
+            string(artifact.sensorProfile) ~= cfg.Runtime.SensorProfile
+        error('MyoDrum:LiveMLSensorProfileMismatch', ...
+            'Model sensor profile %s does not match runtime profile %s.', ...
+            artifact.sensorProfile, cfg.Runtime.SensorProfile);
+    end
     requiredClasses = cfg.MachineLearning.ClassNames(:);
     if ~all(ismember(requiredClasses, string(artifact.classNames(:))))
         error('MyoDrum:LiveMLClassMismatch', ...
@@ -60,9 +67,9 @@ function state = initializeLiveMLClassifier(projectRoot, cfg, options)
     state.time_s = nan(capacity,1);
     state.accel_g = zeros(capacity,3,2);
     state.gyro_rad_s = zeros(capacity,3,2);
-    state.emgNormalized = zeros(capacity,4);
+    state.emgNormalized = zeros(capacity,numel(cfg.EMG.ChannelNames));
     state.frameValid = false(capacity,2);
-    state.emgValid = false(capacity,4);
+    state.emgValid = false(capacity,numel(cfg.EMG.ChannelNames));
     state.pendingActive = false(1,2);
     state.pendingTime_s = nan(1,2);
     state.pendingId = zeros(1,2,'uint32');

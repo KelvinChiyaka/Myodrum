@@ -10,6 +10,7 @@ function profile = buildEMGConfirmationProfile( ...
         options.ActivePercentile (1,1) double ...
             {mustBeInRange(options.ActivePercentile, 50, 100)} = 90
         options.ActiveSampleHands (:,1) string = strings(0,1)
+        options.ActiveChannelMask (:,1) logical = false(0,1)
         options.RailVolts (1,1) double {mustBePositive} = inf
         options.MaximumRailFraction (1,1) double ...
             {mustBeInRange(options.MaximumRailFraction, 0, 1)} = 1
@@ -20,6 +21,13 @@ function profile = buildEMGConfirmationProfile( ...
         options.NoiseFloorVolts (1,1) double {mustBePositive} = 1e-6
     end
     channelCount = numel(hands);
+    activeChannelMask = options.ActiveChannelMask;
+    if isempty(activeChannelMask)
+        activeChannelMask = true(channelCount,1);
+    elseif numel(activeChannelMask) ~= channelCount
+        error('MyoDrum:EMGActiveChannelMaskMismatch', ...
+            'ActiveChannelMask must contain one value per EMG channel.');
+    end
     if size(restVoltage, 2) ~= channelCount || ...
             size(activeVoltage, 2) ~= channelCount
         error('MyoDrum:EMGChannelCountMismatch', ...
@@ -36,6 +44,11 @@ function profile = buildEMGConfirmationProfile( ...
     active = nan(1, channelCount);
     activeRailFraction = nan(1, channelCount);
     for channel = 1:channelCount
+        if ~activeChannelMask(channel)
+            active(channel) = baseline(channel);
+            activeRailFraction(channel) = 0;
+            continue;
+        end
         selected = true(size(activeVoltage, 1), 1);
         if ~isempty(options.ActiveSampleHands)
             selected = options.ActiveSampleHands == hands(channel);
@@ -62,10 +75,14 @@ function profile = buildEMGConfirmationProfile( ...
     hasSignalToNoise = signalToNoise >= ...
         options.MinimumSignalToNoiseRatio;
     valid = hasActiveRise & restIsQuiet & isNotRailed & ...
-        hasSignalToNoise;
+        hasSignalToNoise & activeChannelMask(:).';
     safeSpan = max(span, options.MinimumActiveSpanVolts);
     reason = repmat("OK", 1, channelCount);
     for channel = 1:channelCount
+        if ~activeChannelMask(channel)
+            reason(channel) = "INACTIVE";
+            continue;
+        end
         failures = strings(0,1);
         if ~hasActiveRise(channel)
             failures(end+1,1) = "NO_ACTIVE_RISE"; %#ok<AGROW>

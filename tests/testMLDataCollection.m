@@ -32,6 +32,18 @@ function testDefaultScheduleIsBalanced(testCase)
     end
 end
 
+function testLeftOnlyScheduleHasNoRightBlocks(testCase)
+    cfg = myoDrumConfig(testCase.TestData.Root, "left-three-emg");
+    schedule = buildMLCollectionSchedule( ...
+        cfg.IMU.HandNames(cfg.IMU.ActiveHandIndices), ...
+        cfg.Targets.Names, cfg.MachineLearning.CollectionRounds, ...
+        cfg.MachineLearning.HitsPerClassPerHandPerRound, ...
+        cfg.MachineLearning.NoHitMinimumSeconds);
+    verifyEqual(testCase, height(schedule), 12);
+    verifyEqual(testCase, unique(schedule.Hand), "LEFT");
+    verifyEqual(testCase, sum(double(schedule.ExpectedHitCount)), 180);
+end
+
 function testNoHitBlocksHaveDurationAndNoExpectedHits(testCase)
     cfg = myoDrumConfig(testCase.TestData.Root);
     schedule = buildMLCollectionSchedule(cfg.IMU.HandNames, ...

@@ -10,7 +10,7 @@ function setupOnce(testCase)
     testCase.TestData.Root = root;
 end
 
-function testPublicInterfacesAndFuturePlaceholders(testCase)
+function testPublicInterfacesAndSensorProfiles(testCase)
     entry = fileread(fullfile(testCase.TestData.Root, 'mainMyoDrum.m'));
     verifyNotEmpty(testCase, regexp(entry, '"imu-only"', 'once'));
     verifyNotEmpty(testCase, regexp(entry, '"emg-only"', 'once'));
@@ -25,12 +25,17 @@ function testPublicInterfacesAndFuturePlaceholders(testCase)
     verifyNotEmpty(testCase, regexp(entry, 'liveMode', 'once'));
     verifyTrue(testCase, isfile(fullfile(testCase.TestData.Root, ...
         'calibration', 'calibrateMachineLearningDataset.m')));
-    verifyError(testCase, @()mainMyoDrum( ...
-        "imu-emg-6", "rule-based"), 'MyoDrum:NotImplemented');
+    verifyNotEmpty(testCase, regexp(entry, ...
+        'runLeftThreeChannelFusion', 'once'));
+    verifyTrue(testCase, isfile(fullfile(testCase.TestData.Root, ...
+        'calibration', 'calibrateLeftArmMachineLearningDataset.m')));
     verifyError(testCase, @()mainMyoDrum( ...
         "imu-only", "machine-learning"), 'MyoDrum:NotImplemented');
     verifyNotEmpty(testCase, regexp(entry, ...
         'mainIMUEMGStream\(liveMode, classifier\)', 'once'));
+    verifyNotEmpty(testCase, regexp(entry, ...
+        'mainIMUEMGStream\(liveMode, classifier, "left-three-emg"\)', ...
+        'once'));
 end
 
 function testPerformanceModeIsAvailable(testCase)

@@ -7,11 +7,13 @@ function [features, featureMetadata, blockDiagnostics] = ...
             fileparts(mfilename('fullpath')))))
         options.SessionIds (:,1) string = strings(0,1)
         options.OutputFolder (1,1) string = ""
+        options.SensorProfile (1,1) string = "four-channel"
     end
     addpath(fullfile(projectRoot, 'common'));
-    cfg = myoDrumConfig(projectRoot);
+    cfg = myoDrumConfig(projectRoot, options.SensorProfile);
     if options.OutputFolder == ""
-        outputFolder = fullfile(cfg.Paths.ProcessedData, 'machineLearning');
+        outputFolder = fullfile(cfg.Paths.ProcessedData, ...
+            cfg.MachineLearning.DataFolderName);
     else
         outputFolder = options.OutputFolder;
     end
@@ -65,6 +67,7 @@ function [features, featureMetadata, blockDiagnostics] = ...
 
     featureMetadata.createdAt = string(datetime('now','TimeZone','local'));
     featureMetadata.featureVersion = cfg.MachineLearning.FeatureVersion;
+    featureMetadata.sensorProfile = cfg.Runtime.SensorProfile;
     featureMetadata.sourceSessions = sessionIds;
     featureMetadata.featureNames = featureNames;
     featureMetadata.classNames = classNames;
@@ -112,13 +115,27 @@ function sessionIds = discoverCompleteSessions(cfg)
         if ~isfile(rawFile) || ~isfile(metadataFile), continue; end
         saved = load(metadataFile, 'metadata');
         metadata = saved.metadata;
+        profile = metadataProfile(metadata);
         if isfield(metadata, 'mode') && metadata.mode == "ml-data-collection" && ...
                 isfield(metadata, 'completedNormally') && ...
-                metadata.completedNormally
+                metadata.completedNormally && ...
+                profile == cfg.Runtime.SensorProfile
             sessionIds(end+1,1) = sessionId; %#ok<AGROW>
         end
     end
     sessionIds = sort(sessionIds);
+end
+
+function profile = metadataProfile(metadata)
+    if isfield(metadata, 'sensorProfile')
+        profile = string(metadata.sensorProfile);
+    elseif isfield(metadata, 'config') && ...
+            isfield(metadata.config, 'Runtime') && ...
+            isfield(metadata.config.Runtime, 'SensorProfile')
+        profile = string(metadata.config.Runtime.SensorProfile);
+    else
+        profile = "four-channel";
+    end
 end
 
 function requireFile(file)

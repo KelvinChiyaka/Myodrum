@@ -1,9 +1,10 @@
-function mainIMUEMGStream(liveMode, classifierMode)
+function mainIMUEMGStream(liveMode, classifierMode, sensorProfile)
 % MAINIMUEMGSTREAM Synchronized 200 Hz IMU drum selection + EMG confirmation.
 
     arguments
         liveMode (1,1) string = "prompt"
         classifierMode (1,1) string = "rule-based"
+        sensorProfile (1,1) string = "four-channel"
     end
 
     clc;
@@ -14,7 +15,9 @@ function mainIMUEMGStream(liveMode, classifierMode)
     addpath(fullfile(root, 'classifiers', 'ruleBased'));
     addpath(fullfile(root, 'classifiers', 'machineLearning'));
     addpath(fullfile(root, 'audio'));
-    cfg = myoDrumConfig(root);
+    cfg = myoDrumConfig(root, sensorProfile);
+    activeHands = cfg.IMU.ActiveHandIndices;
+    activeChannels = cfg.EMG.ActiveChannelMask(:);
     classifierMode = lower(strtrim(classifierMode));
     if ~ismember(classifierMode, ...
             ["rule-based", "machine-learning", "hybrid"])
@@ -44,6 +47,7 @@ function mainIMUEMGStream(liveMode, classifierMode)
     metadata.startedAt = startedAt;
     metadata.mode = "imu-emg-stream";
     metadata.classifierMode = classifierMode;
+    metadata.sensorProfile = cfg.Runtime.SensorProfile;
     metadata.config = cfg;
     if recordLiveData
         metadata.rawDataFile = string(rawFile);
@@ -57,7 +61,7 @@ function mainIMUEMGStream(liveMode, classifierMode)
         "Arduino micros() shared by both IMUs and all EMG channels";
     save(metadataFile, 'metadata');
 
-    fprintf('MyoDrum: synchronized dual-IMU + EMG stream\n');
+    fprintf('MyoDrum: synchronized IMU + EMG stream\n');
     fprintf('Session: %s\n', sessionId);
     fprintf('Classifier: %s\n', upper(classifierMode));
     if recordLiveData
@@ -65,22 +69,31 @@ function mainIMUEMGStream(liveMode, classifierMode)
     else
         fprintf('Live mode: PERFORMANCE (no continuous live data recording).\n');
     end
-    fprintf(['Firmware target: %.0f complete synchronized frames/s.\n' ...
-        'Upload firmware/MyoDrumIMUEMGStream first.\n'], ...
+    fprintf('Firmware target: %.0f complete synchronized frames/s.\n', ...
         cfg.EMG.CombinedStreamRateHz);
+    if cfg.Runtime.SensorProfile == "left-three-emg"
+        fprintf('Upload firmware/MyoDrumLeft3EMGStream first.\n');
+    else
+        fprintf('Upload firmware/MyoDrumIMUEMGStream first.\n');
+    end
     reader = IMUEMGStreamReader(cfg.Hardware.COMPort, ...
         cfg.EMG.CombinedStreamBaud);
     cleanupReader = onCleanup(@()delete(reader));
 
     fprintf('\nREST/BIAS CALIBRATION\n');
-    input('Keep both sticks and all muscles relaxed, then press Enter...', 's');
+    if numel(activeHands) == 1
+        input(['Keep the LEFT stick and left-arm muscles relaxed, then ' ...
+            'press Enter...'], 's');
+    else
+        input('Keep both sticks and all muscles relaxed, then press Enter...', 's');
+    end
     reader.start();
     pause(cfg.IMU.StreamStartupSettleSeconds);
     discardPendingFrames(reader, cfg);
     restFrames = collectForSeconds(reader, max(3, cfg.EMG.RestSeconds), cfg);
     ensureHealthyFrames(restFrames, cfg);
     gyroBiasDps = zeros(2, 3);
-    for hand = 1:2
+    for hand = activeHands
         gyroBiasDps(hand, :) = median( ...
             restFrames.gyroDps(:, :, hand), 1);
     end
@@ -88,7 +101,7 @@ function mainIMUEMGStream(liveMode, classifierMode)
 
     activeFrames = emptyFrames;
     activeSampleHands = strings(0,1);
-    for hand = 1:2
+    for hand = activeHands
         fprintf('\n%s EMG GAIN CALIBRATION\n', cfg.IMU.HandNames(hand));
         input(sprintf(['Keep the other arm relaxed. Press Enter to START, ' ...
             'then immediately use the %s hand to play comfortable KICK, ' ...
@@ -108,6 +121,7 @@ function mainIMUEMGStream(liveMode, classifierMode)
         cfg.EMG.Hands, MinimumActiveSpanVolts= ...
         cfg.EMG.MinimumActiveSpanVolts, ...
         ActiveSampleHands=activeSampleHands, ...
+        ActiveChannelMask=cfg.EMG.ActiveChannelMask, ...
         RailVolts=cfg.EMG.Quality.RailVolts, ...
         MaximumRailFraction=cfg.EMG.Quality.MaximumRailFraction, ...
         MaximumRestSigmaVolts=cfg.EMG.Quality.RestSigmaWarnVolts, ...
@@ -121,8 +135,8 @@ function mainIMUEMGStream(liveMode, classifierMode)
     save(fullfile(rawFolder, 'emgConfirmationCalibration.mat'), ...
         'emgCalibration', '-v7.3');
     printEMGProfile(profile, cfg);
-    if ~all(profile.validChannel)
-        invalid = ~profile.validChannel(:);
+    if ~all(profile.validChannel(activeChannels))
+        invalid = activeChannels & ~profile.validChannel(:);
         reasons = profile.qualityReason(:);
         details = cfg.EMG.ChannelNames(invalid) + " (" + ...
             reasons(invalid) + ")";
@@ -141,13 +155,13 @@ function mainIMUEMGStream(liveMode, classifierMode)
     fprintf('EMG safety check passed. Audio can now be enabled.\n');
 
     estimators = cell(1, 2);
-    for hand = 1:2
+    for hand = activeHands
         estimators{hand} = GravityAzimuthEstimator( ...
             cfg.Orientation.EstimatorOverrides);
         estimators{hand}.setStrokeAxis(directions(hand).axis);
     end
     for row = 1:numel(restFrames.time_s)
-        for hand = 1:2
+        for hand = activeHands
             accel = applyMPU6050AccelCalibration( ...
                 reshape(restFrames.accelG(row, :, hand), 1, 3), ...
                 accelCalibration{hand});
@@ -195,15 +209,15 @@ function mainIMUEMGStream(liveMode, classifierMode)
     hostTimeOffset_s = NaN;
     lastFrameTime_s = NaN;
     if classifierMode == "machine-learning"
-        fprintf(['\nREADY. ML selects KICK, SNARE, CRASH or NO_HIT; both ' ...
-            'same-hand EMG channels must confirm sound. Press Q or close ' ...
+        fprintf(['\nREADY. ML selects KICK, SNARE, CRASH or NO_HIT; the ' ...
+            'configured EMG gate must confirm sound. Press Q or close ' ...
             'the window to stop.\n\n']);
     elseif classifierMode == "hybrid"
         fprintf(['\nREADY. Rule-based and ML drum labels must agree, and ' ...
-            'both same-hand EMG channels must confirm sound. Press Q or ' ...
+            'the configured EMG gate must confirm sound. Press Q or ' ...
             'close the window to stop.\n\n']);
     else
-        fprintf(['\nREADY. IMU selects the drum; both same-hand EMG channels ' ...
+        fprintf(['\nREADY. IMU selects the drum; the configured EMG gate ' ...
             'must confirm each hit. Press Q or close the window to stop.\n\n']);
     end
 
@@ -224,11 +238,12 @@ function mainIMUEMGStream(liveMode, classifierMode)
                 profile.baseline_V) ./ profile.activeSpan_V);
             railed = volts(row, :) >= cfg.EMG.Quality.RailVolts;
             lastRailTime_s(railed) = frames.time_s(row);
-            runtimeValid = profile.validChannel & ...
+            runtimeValid = profile.validChannel & activeChannels.' & ...
                 frames.time_s(row) - lastRailTime_s >= ...
                 cfg.EMG.Quality.RuntimeRailHoldSeconds;
             normalizedEMG(~runtimeValid) = 0;
-            newlyFaulted = ~runtimeValid & ~runtimeFaultReported;
+            newlyFaulted = activeChannels.' & ~runtimeValid & ...
+                ~runtimeFaultReported;
             if any(newlyFaulted)
                 warning('MyoDrum:EMGRuntimeRail', ...
                     ['EMG channel(s) %s railed at runtime and were ' ...
@@ -242,7 +257,7 @@ function mainIMUEMGStream(liveMode, classifierMode)
             ypr = zeros(1, 3, 2);
             candidateHit = false(1, 2);
             candidateLabels = strings(1, 2);
-            for hand = 1:2
+            for hand = activeHands
                 if ~frames.frameValid(row, hand), continue; end
                 accel = applyMPU6050AccelCalibration( ...
                     reshape(frames.accelG(row, :, hand), 1, 3), ...
@@ -305,14 +320,14 @@ function mainIMUEMGStream(liveMode, classifierMode)
                     runtimeValid(:), cfg.Fusion);
             end
             displayScores = decision.emgScore;
-            for hand = 1:2
+            for hand = activeHands
                 if candidateLabels(hand) ~= ""
                     displayLabels(hand) = candidateLabels(hand);
                 end
             end
             targetIndex = zeros(1, 2, 'uint8');
             candidateTargetIndex = zeros(1, 2, 'uint8');
-            for hand = 1:2
+            for hand = activeHands
                 if candidateLabels(hand) ~= ""
                     match = find(cfg.Targets.Names == ...
                         candidateLabels(hand), 1);
@@ -338,7 +353,7 @@ function mainIMUEMGStream(liveMode, classifierMode)
             rejectedCount = rejectedCount + double(decision.rejected);
             % Play once per accepted hand. Do not collapse equal labels: a
             % simultaneous KICK from both sticks must use two audio voices.
-            for hand = 1:2
+            for hand = activeHands
                 if decision.accepted(hand) && decision.labels(hand) ~= ""
                     banks = playLabel(banks, decision.labels(hand));
                 end
@@ -424,7 +439,7 @@ function mainIMUEMGStream(liveMode, classifierMode)
             lastFrameTime_s+ ...
             cfg.Fusion.EMGConfirmationTimeoutSeconds+eps, ...
             false(1,2), strings(1,2), zeros(1,4), cfg.EMG.Hands, ...
-            profile.validChannel(:), cfg.Fusion); %#ok<ASGLU>
+            profile.validChannel(:) & activeChannels, cfg.Fusion); %#ok<ASGLU>
         for eventIndex = 1:numel(finalEvents)
             hand = double(finalEvents(eventIndex).handIndex);
             if finalEvents(eventIndex).accepted
@@ -517,7 +532,7 @@ end
 function [accel, directions, model] = loadCalibrations(cfg)
     folder = fullfile(cfg.Paths.Metadata, 'calibration');
     accel = cell(1, 2);
-    for hand = 1:2
+    for hand = cfg.IMU.ActiveHandIndices
         token = erase(cfg.IMU.Addresses(hand), '0x');
         file = fullfile(folder, "mpu6050_0x" + token + ...
             "_accelCalibration.mat");
@@ -617,8 +632,11 @@ function ensureHealthyFrames(frames, cfg)
         (100*validFraction(:)), failedFrames(:), ...
         'VariableNames', {'Hand','Address','ValidFrames_pct', ...
         'FailedFrames'}));
-    if any(validFraction < cfg.IMU.StreamMinimumValidFraction)
-        failed = validFraction < cfg.IMU.StreamMinimumValidFraction;
+    active = cfg.IMU.ActiveHandIndices;
+    if any(validFraction(active) < cfg.IMU.StreamMinimumValidFraction)
+        failed = false(size(validFraction));
+        failed(active) = validFraction(active) < ...
+            cfg.IMU.StreamMinimumValidFraction;
         details = cfg.IMU.HandNames(failed) + " " + ...
             cfg.IMU.Addresses(failed) + "=" + ...
             compose('%.1f%%',100*validFraction(failed));
@@ -627,7 +645,7 @@ function ensureHealthyFrames(frames, cfg)
              'connection can be present while I2C transactions fail; ' ...
              'check SDA/SCL length, pull-ups, power and address wiring.'], ...
             100*cfg.IMU.StreamMinimumValidFraction, strjoin(details, ', '));
-    elseif any(validFraction < cfg.IMU.StreamWarningValidFraction)
+    elseif any(validFraction(active) < cfg.IMU.StreamWarningValidFraction)
         warning('MyoDrum:IntermittentIMUReadFailures', ...
             ['One or more MPUs had intermittent startup read failures. ' ...
              'Live processing will discard those isolated frames.']);
@@ -639,13 +657,14 @@ function volts = adcToVolts(adc, cfg)
 end
 
 function printEMGProfile(profile, cfg)
-    disp(table(cfg.EMG.ChannelNames, cfg.EMG.AnalogPins, ...
-        profile.baseline_V', profile.noiseSigma_V', ...
-        profile.activeReference_V', profile.activeSpan_V', ...
-        100 * profile.restRailFraction', ...
-        100 * profile.activeRailFraction', ...
-        profile.signalToNoiseRatio', profile.validChannel', ...
-        profile.qualityReason', 'VariableNames', ...
+    active = cfg.EMG.ActiveChannelMask(:);
+    disp(table(cfg.EMG.ChannelNames(active), cfg.EMG.AnalogPins(active), ...
+        profile.baseline_V(active)', profile.noiseSigma_V(active)', ...
+        profile.activeReference_V(active)', profile.activeSpan_V(active)', ...
+        100 * profile.restRailFraction(active)', ...
+        100 * profile.activeRailFraction(active)', ...
+        profile.signalToNoiseRatio(active)', profile.validChannel(active)', ...
+        profile.qualityReason(active)', 'VariableNames', ...
         {'Channel','Pin','Rest_V','RestNoise_V','ActiveReference_V', ...
          'Span_V','RestRail_pct','ActiveRail_pct','SignalToNoise', ...
          'Valid','Reason'}));

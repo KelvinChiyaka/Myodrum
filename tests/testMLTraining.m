@@ -23,7 +23,9 @@ function testTrainingSourceUsesSessionHeldOutValidation(testCase)
     source = fileread(fullfile(testCase.TestData.Root,'classifiers', ...
         'machineLearning','trainMLBaggedTreeClassifier.m'));
     verifyNotEmpty(testCase,regexp(source, ...
-        'testRows = features\.SessionId == sessions\(fold\)', 'once'));
+        'validationMethod = "leave-one-session-out"', 'once'));
+    verifyNotEmpty(testCase,regexp(source, ...
+        'leave-one-round-out-preliminary', 'once'));
     verifyNotEmpty(testCase,regexp(source,'fitcensemble', 'once'));
     verifyNotEmpty(testCase,regexp(source,'MyoDrum:MLIdentityLeakage','once'));
     verifyNotEmpty(testCase,regexp(source,'predictorNames', 'once'));

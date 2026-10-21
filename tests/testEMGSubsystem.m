@@ -24,6 +24,25 @@ function testConfigPinMapAndShapes(testCase)
     verifyFalse(testCase, any(ismember(["A1"; "A5"], cfg.EMG.AnalogPins)));
 end
 
+function testLeftThreeEMGProfileUsesOnlyLeftChannels(testCase)
+    cfg = myoDrumConfig(testCase.TestData.Root, "left-three-emg");
+    verifyEqual(testCase, cfg.IMU.ActiveHandIndices, 1);
+    verifyEqual(testCase, cfg.EMG.AnalogPins, ...
+        ["A0"; "A1"; "A2"; "A4"]);
+    verifyEqual(testCase, cfg.EMG.ActiveChannelMask, ...
+        [true; true; true; false]);
+    verifyEqual(testCase, cfg.EMG.Hands, ...
+        ["LEFT"; "LEFT"; "LEFT"; "UNUSED"]);
+    verifyEqual(testCase, cfg.Fusion.RequiredActiveChannels, 2);
+end
+
+function testLeftThreeEMGFirmwareUsesConfiguredPins(testCase)
+    firmware = fileread(fullfile(testCase.TestData.Root, 'firmware', ...
+        'MyoDrumLeft3EMGStream', 'MyoDrumLeft3EMGStream.ino'));
+    verifyNotEmpty(testCase, regexp(firmware, ...
+        'EMG_PINS\[\]\s*=\s*\{A0,\s*A1,\s*A2,\s*A4\}', 'once'));
+end
+
 function testCoupledChannelDetection(testCase)
     waveform = sin((1:200)' / 9);
     values = [waveform, mod((1:200)', 17) / 17, ...

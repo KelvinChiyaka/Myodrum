@@ -8,9 +8,9 @@ function [state, decision, events] = updateLiveMLClassifier( ...
         time_s (1,1) double {mustBeFinite}
         accel_g (1,3,2) double {mustBeFinite}
         gyro_rad_s (1,3,2) double {mustBeFinite}
-        normalizedEMG (1,4) double {mustBeFinite, mustBeNonnegative}
+        normalizedEMG (1,:) double {mustBeFinite, mustBeNonnegative}
         frameValid (1,2) logical
-        emgValid (1,4) logical
+        emgValid (1,:) logical
         imuCandidate (1,2) logical
         cfg (1,1) struct
         ruleLabels (1,2) string = strings(1,2)
@@ -82,7 +82,8 @@ function [state, decision, event] = resolveCandidate(state, hand, now_s, cfg)
         cfg.EMG.CombinedStreamRateHz;
     minimumRows = floor(expected * ...
         cfg.MachineLearning.LiveMinimumWindowFraction);
-    handChannels = find(cfg.EMG.Hands == cfg.IMU.HandNames(hand));
+    handChannels = find(cfg.EMG.ActiveChannelMask(:) & ...
+        cfg.EMG.Hands == cfg.IMU.HandNames(hand));
 
     label = "";
     confidence = 0;
@@ -96,11 +97,13 @@ function [state, decision, event] = resolveCandidate(state, hand, now_s, cfg)
     if numel(validRows) >= minimumRows
         rows = validRows;
         emgWindow = state.emgNormalized(rows,:);
-        emgHealthy = numel(handChannels) == 2 && ...
+        requiredChannels = cfg.Fusion.RequiredActiveChannels;
+        emgHealthy = numel(handChannels) >= requiredChannels && ...
             all(all(state.emgValid(rows,handChannels)));
-        if numel(handChannels) == 2
+        if numel(handChannels) >= requiredChannels
             emgPeaks = max(emgWindow(:,handChannels),[],1);
-            emgScore = min(emgPeaks);
+            emgPeaks = sort(emgPeaks, 'descend');
+            emgScore = emgPeaks(requiredChannels);
         end
         if ~emgHealthy
             reason = "EMG_INVALID";

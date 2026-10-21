@@ -55,3 +55,18 @@ function testSyntheticBlocksProduceBalancedFiniteFeatures(testCase)
     detected = features.WindowCenter_s(features.Label=="KICK");
     verifyEqual(testCase,detected,recorded.time_s(peaks),'AbsTol',0.03);
 end
+
+function testLeftThreeChannelFeatureDefinition(testCase)
+    cfg = myoDrumConfig(testCase.TestData.Root, "left-three-emg");
+    count = 61;
+    time = (0:count-1)' / cfg.EMG.CombinedStreamRateHz;
+    accel = [zeros(count,2), ones(count,1)];
+    gyro = zeros(count,3);
+    emg = zeros(count,4);
+    emg(:,1:3) = 0.5;
+    [values,names] = computeMLWindowFeatures( ...
+        accel,gyro,emg,time,1,cfg);
+    verifyEqual(testCase,numel(values),62);
+    verifyTrue(testCase,any(names=="SameEMG3Max"));
+    verifyFalse(testCase,any(startsWith(names,"OtherEMG")));
+end

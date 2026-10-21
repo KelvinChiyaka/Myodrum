@@ -5,7 +5,7 @@ function [values, names] = computeMLWindowFeatures( ...
     arguments
         accel (:,3) double {mustBeFinite}
         gyro (:,3) double {mustBeFinite}
-        emg (:,4) double {mustBeFinite, mustBeNonnegative}
+        emg (:,:) double {mustBeFinite, mustBeNonnegative}
         time_s (:,1) double {mustBeFinite}
         handIndex (1,1) double {mustBeInteger, mustBePositive}
         cfg (1,1) struct
@@ -42,16 +42,21 @@ function [values, names] = computeMLWindowFeatures( ...
         "AngularAccelMagMax"];
 
     handName = cfg.IMU.HandNames(handIndex);
-    sameChannels = find(cfg.EMG.Hands == handName);
-    otherChannels = find(cfg.EMG.Hands ~= handName);
-    if numel(sameChannels) ~= 2 || numel(otherChannels) ~= 2
+    activeChannels = cfg.EMG.ActiveChannelMask(:);
+    if size(emg,2) ~= numel(activeChannels)
         error('MyoDrum:InvalidMLFeatureChannelMap', ...
-            'Feature extraction requires two EMG channels per hand.');
+            'EMG data width does not match the configured stream channels.');
     end
-    emgValues = zeros(1,12);
-    emgNames = strings(1,12);
+    sameChannels = find(activeChannels & cfg.EMG.Hands == handName);
+    otherChannels = find(activeChannels & cfg.EMG.Hands ~= handName);
+    if numel(sameChannels) < cfg.Fusion.RequiredActiveChannels
+        error('MyoDrum:InvalidMLFeatureChannelMap', ...
+            'The active hand has too few configured EMG channels.');
+    end
+    emgValues = zeros(1,6*numel(sameChannels));
+    emgNames = strings(1,6*numel(sameChannels));
     cursor = 0;
-    for channel = 1:2
+    for channel = 1:numel(sameChannels)
         signal = emg(:,sameChannels(channel));
         current = [mean(signal), std(signal), max(signal), ...
             rootMeanSquare(signal), trapz(time_s,signal), ...
@@ -62,12 +67,14 @@ function [values, names] = computeMLWindowFeatures( ...
         emgNames(cursor+(1:6)) = currentNames;
         cursor = cursor + 6;
     end
-    otherValues = [max(emg(:,otherChannels(1))), ...
-        rootMeanSquare(emg(:,otherChannels(1))), ...
-        max(emg(:,otherChannels(2))), ...
-        rootMeanSquare(emg(:,otherChannels(2)))];
-    otherNames = ["OtherEMG1Max","OtherEMG1Rms", ...
-        "OtherEMG2Max","OtherEMG2Rms"];
+    otherValues = zeros(1,2*numel(otherChannels));
+    otherNames = strings(1,2*numel(otherChannels));
+    for channel = 1:numel(otherChannels)
+        signal = emg(:,otherChannels(channel));
+        at = 2*(channel-1) + (1:2);
+        otherValues(at) = [max(signal), rootMeanSquare(signal)];
+        otherNames(at) = "OtherEMG" + channel + ["Max", "Rms"];
+    end
 
     gravityRows = 1:max(1,round(0.20*size(accel,1)));
     gravity = mean(accel(gravityRows,:),1);

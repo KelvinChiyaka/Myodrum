@@ -9,18 +9,20 @@ function [modelArtifact, validation] = ...
             fileparts(mfilename('fullpath')))))
         options.FeatureFile (1,1) string = ""
         options.OutputFolder (1,1) string = ""
+        options.SensorProfile (1,1) string = "four-channel"
     end
 
     addpath(fullfile(projectRoot, 'common'));
-    cfg = myoDrumConfig(projectRoot);
+    cfg = myoDrumConfig(projectRoot, options.SensorProfile);
     if options.FeatureFile == ""
         featureFile = fullfile(cfg.Paths.ProcessedData, ...
-            'machineLearning', 'mlFeatureDataset.mat');
+            cfg.MachineLearning.DataFolderName, 'mlFeatureDataset.mat');
     else
         featureFile = options.FeatureFile;
     end
     if options.OutputFolder == ""
-        outputFolder = fullfile(cfg.Paths.Models, 'machineLearning');
+        outputFolder = fullfile(cfg.Paths.Models, ...
+            cfg.MachineLearning.ModelFolderName);
     else
         outputFolder = options.OutputFolder;
     end
@@ -73,26 +75,38 @@ function [modelArtifact, validation] = ...
             'The feature table contains a label not listed in metadata.');
     end
     sessions = unique(string(features.SessionId), 'stable');
-    if numel(sessions) < 3
+    if numel(sessions) >= 3
+        validationGroups = sessions;
+        groupValues = string(features.SessionId);
+        validationMethod = "leave-one-session-out";
+    elseif cfg.Runtime.SensorProfile == "left-three-emg"
+        validationGroups = unique(string(features.SessionRoundGroup), 'stable');
+        groupValues = string(features.SessionRoundGroup);
+        validationMethod = "leave-one-round-out-preliminary";
+    else
         error('MyoDrum:InsufficientMLValidationSessions', ...
             ['At least three complete sessions are required for ' ...
              'leave-one-session-out validation.']);
+    end
+    if numel(validationGroups) < 3
+        error('MyoDrum:InsufficientMLValidationGroups', ...
+            'At least three independent validation groups are required.');
     end
 
     rng(42, 'twister');
     order = categorical(classNames, classNames);
     heldOutPrediction = categorical(strings(height(features),1), classNames);
     heldOutFold = zeros(height(features),1, 'uint8');
-    foldRows = repmat(emptyFold, numel(sessions), 1);
+    foldRows = repmat(emptyFold, numel(validationGroups), 1);
     aggregateConfusion = zeros(numel(classNames));
-    for fold = 1:numel(sessions)
-        testRows = features.SessionId == sessions(fold);
+    for fold = 1:numel(validationGroups)
+        testRows = groupValues == validationGroups(fold);
         trainRows = ~testRows;
         if ~all(countcats(response(trainRows)) > 0) || ...
                 ~all(countcats(response(testRows)) > 0)
             error('MyoDrum:IncompleteMLValidationFold', ...
                 'Session %s does not support fixed-class validation.', ...
-                sessions(fold));
+                validationGroups(fold));
         end
         classifier = fitBaggedTrees(predictors(trainRows,:), ...
             response(trainRows), cfg);
@@ -105,7 +119,7 @@ function [modelArtifact, validation] = ...
         metrics = calculateClassificationMetrics(confusion, classNames);
         aggregateConfusion = aggregateConfusion + confusion;
         foldRows(fold).Fold = uint8(fold);
-        foldRows(fold).HeldOutSession = sessions(fold);
+        foldRows(fold).HeldOutSession = validationGroups(fold);
         foldRows(fold).TrainingRows = uint32(sum(trainRows));
         foldRows(fold).TestRows = uint32(sum(testRows));
         foldRows(fold).Accuracy = metrics.accuracy;
@@ -128,7 +142,7 @@ function [modelArtifact, validation] = ...
         'VariableNames', {'Feature','Importance'});
     featureImportance = sortrows(featureImportance, 'Importance', 'descend');
 
-    validation.method = "leave-one-session-out";
+    validation.method = validationMethod;
     validation.sessions = sessions;
     validation.classNames = classNames;
     validation.confusionMatrix = aggregateConfusion;
@@ -139,6 +153,7 @@ function [modelArtifact, validation] = ...
 
     modelArtifact.modelVersion = cfg.MachineLearning.ModelVersion;
     modelArtifact.featureVersion = featureMetadata.featureVersion;
+    modelArtifact.sensorProfile = cfg.Runtime.SensorProfile;
     modelArtifact.classifier = compact(fullClassifier);
     modelArtifact.predictorNames = predictorNames;
     modelArtifact.classNames = classNames;
@@ -150,7 +165,8 @@ function [modelArtifact, validation] = ...
     modelArtifact.heldOutMacroF1 = overall.macroF1;
 
     if ~isfolder(outputFolder), mkdir(outputFolder); end
-    modelFile = fullfile(outputFolder, 'myoDrumBaggedTrees.mat');
+    modelFile = fullfile(outputFolder, ...
+        cfg.MachineLearning.ModelFileName);
     save(modelFile, 'modelArtifact', 'validation', '-v7.3');
     writetable(sessionValidation, ...
         fullfile(outputFolder, 'sessionValidation.csv'));
@@ -166,7 +182,7 @@ function [modelArtifact, validation] = ...
         sessionValidation, fullfile(outputFolder, 'validationSummary.png'));
 
     fprintf('\nMyoDrum bagged-tree training complete.\n');
-    fprintf('Validation: leave one complete session out per fold.\n');
+    fprintf('Validation: %s.\n', validation.method);
     fprintf('Held-out accuracy: %.1f%%\n', 100*overall.accuracy);
     fprintf('Held-out macro F1: %.3f\n', overall.macroF1);
     disp(sessionValidation(:, {'HeldOutSession','TestRows','Accuracy','MacroF1'}));

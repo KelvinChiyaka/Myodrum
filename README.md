@@ -19,9 +19,10 @@ mainMyoDrum
 ```
 
 The public interfaces are IMU only, EMG only, synchronized IMU + four-channel
-EMG, and the reserved six-channel interface. Four-channel live play supports
-rule-based, bagged-tree machine-learning and conservative hybrid classifiers.
-The six-channel interface remains a future stage.
+EMG, and a left-stick profile with three bipolar EMG channels (six sensing
+electrodes). Four-channel live play supports rule-based, bagged-tree
+machine-learning and conservative hybrid classifiers. The left-stick profile
+keeps its recordings and trained model separate from the four-channel study.
 
 For repeatable testing the implemented modes can be started directly:
 
@@ -31,6 +32,7 @@ mainMyoDrum("emg-only")
 mainMyoDrum("imu-emg-4", "rule-based", "performance")
 mainMyoDrum("imu-emg-4", "machine-learning", "performance")
 mainMyoDrum("imu-emg-4", "hybrid", "performance")
+mainMyoDrum("imu-emg-6", "rule-based", "recording")
 ```
 
 Machine-learning collection remains a separate calibration workflow. Live ML
@@ -168,6 +170,42 @@ block manifest and session metadata are written under the matching
 Block labels describe the requested activity during that interval. They do not
 mean every individual 200 Hz frame is a drum hit. A later feature-extraction
 stage must locate one short movement window per strike inside each hit block.
+
+## Left-stick six-electrode test
+
+This profile uses three bipolar EMG channels on the left arm: brachioradialis,
+triceps brachii and extensor carpi radialis longus. Connect their amplifier
+envelopes to `A0`, `A1` and `A2`, respectively. The shared reference/ground is
+unchanged. `A4` and all right-hand signals are ignored by calibration and hit
+confirmation, although both MPU6050 devices may remain connected.
+
+Before running this profile, upload
+`firmware/MyoDrumLeft3EMGStream/MyoDrumLeft3EMGStream.ino` to the Mega 2560.
+The established four-channel firmware deliberately retains its original pin
+map and must not be used for this `A0`/`A1`/`A2` experiment.
+
+Record a labelled left-arm ML session with:
+
+```matlab
+addpath("calibration")
+calibrateLeftArmMachineLearningDataset
+```
+
+Train the separate left-arm model with:
+
+```matlab
+[modelArtifact, validation] = trainLeftArmMachineLearningModel;
+```
+
+One session is reported as preliminary leave-one-round-out validation. With
+three or more complete left-arm sessions the workflow automatically uses
+leave-one-session-out validation. Live rule-based or ML research recordings
+are started with:
+
+```matlab
+mainMyoDrum("imu-emg-6", "rule-based", "recording")
+mainMyoDrum("imu-emg-6", "machine-learning", "recording")
+```
 
 To deliberately repeat calibration, edit `common/myoDrumConfig.m`:
 

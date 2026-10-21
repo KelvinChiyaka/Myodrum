@@ -31,11 +31,13 @@ Myodrum/
 ## Responsibilities
 
 - `mainMyoDrum.m` is the small integration and session entry point. Its startup
-  menu selects IMU only, EMG only, four-channel IMU + EMG, or a reserved
-  six-channel interface, followed by the classifier choice. Rule-based, trained
-  bagged-tree ML and conservative hybrid classification are available for the
-  four-channel path. The entry point selects modes but does not duplicate sensor
-  or classifier algorithms.
+  menu selects IMU only, EMG only, four-channel IMU + EMG, or the left-stick
+  three-EMG-channel profile (six sensing electrodes), followed by the classifier
+  choice. Rule-based, trained bagged-tree ML and conservative hybrid
+  classification remain available for the four-channel path. The left-stick
+  profile supports rule-based operation immediately and uses its own labelled
+  dataset and trained ML model. The entry point selects modes but does not
+  duplicate sensor or classifier algorithms.
 - `IMU_subsystem/` owns MPU6050 connection, register configuration, acquisition,
   bias/scale calibration, health checks, and IMU-derived motion features.
 - `EMG_subsystem/` will own EMG acquisition, channel mapping, filtering,
@@ -51,7 +53,10 @@ Myodrum/
   known working kick prototype and earlier five-drum pilot are retained here.
   The machine-learning collector implementation records balanced, labelled
   synchronized IMU/EMG blocks and is launched by
-  `calibration/calibrateMachineLearningDataset.m`.
+  `calibration/calibrateMachineLearningDataset.m`. The separate
+  `calibration/calibrateLeftArmMachineLearningDataset.m` wrapper records the
+  left-stick three-channel experiment without mixing it into the completed
+  four-channel dataset.
 - `common/` contains shared configuration, labels, validation, timestamps, and
   logging helpers.
 - `data/` is the runtime data boundary. Raw trials are immutable; derived data

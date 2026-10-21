@@ -1,5 +1,9 @@
-function mainMLDataCollection
-% MAINMLDATACOLLECTION Record labelled dual-IMU and four-channel EMG blocks.
+function mainMLDataCollection(sensorProfile)
+% MAINMLDATACOLLECTION Record labelled synchronized IMU and EMG blocks.
+
+    arguments
+        sensorProfile (1,1) string = "four-channel"
+    end
 
     clc;
     root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
@@ -7,10 +11,11 @@ function mainMLDataCollection
     addpath(fullfile(root, 'IMU_subsystem'));
     addpath(fullfile(root, 'EMG_subsystem'));
     addpath(fullfile(root, 'classifiers', 'machineLearning'));
-    cfg = myoDrumConfig(root);
+    cfg = myoDrumConfig(root, sensorProfile);
+    activeHands = cfg.IMU.ActiveHandIndices;
     [accelCalibration, accelCalibrationFiles] = ...
         loadAccelerometerCalibrations(cfg);
-    schedule = buildMLCollectionSchedule(cfg.IMU.HandNames, ...
+    schedule = buildMLCollectionSchedule(cfg.IMU.HandNames(activeHands), ...
         cfg.Targets.Names, cfg.MachineLearning.CollectionRounds, ...
         cfg.MachineLearning.HitsPerClassPerHandPerRound, ...
         cfg.MachineLearning.NoHitMinimumSeconds);
@@ -33,11 +38,16 @@ function mainMLDataCollection
     log = emptyCollectionLog;
     manifest = emptyManifest(schedule);
     profile = struct;
-    gyroBiasDps = nan(2, 3);
+    gyroBiasDps = zeros(2, 3);
     fprintf('MyoDrum: labelled machine-learning data collection\n');
     fprintf('Session: %s\n', sessionId);
     fprintf('Firmware target: %.0f synchronized frames/s.\n', ...
         cfg.EMG.CombinedStreamRateHz);
+    if cfg.Runtime.SensorProfile == "left-three-emg"
+        fprintf('Upload firmware/MyoDrumLeft3EMGStream first.\n');
+    else
+        fprintf('Upload firmware/MyoDrumIMUEMGStream first.\n');
+    end
     fprintf('This records data only; it does not classify or play sounds.\n');
     fprintf('Planned blocks: %d (%d labelled hits plus NO_HIT movement).\n', ...
         height(schedule), sum(double(schedule.ExpectedHitCount)));
@@ -48,13 +58,18 @@ function mainMLDataCollection
         cleanupReader = onCleanup(@()delete(reader));
 
         fprintf('\nREST/BIAS CALIBRATION\n');
-        input(['Keep both sticks and all muscles relaxed, then press ' ...
-            'Enter...'], 's');
+        if numel(activeHands) == 1
+            input(['Keep the LEFT stick and left-arm muscles relaxed, then ' ...
+                'press Enter...'], 's');
+        else
+            input(['Keep both sticks and all muscles relaxed, then press ' ...
+                'Enter...'], 's');
+        end
         reader.start();
         restFrames = collectForSeconds(reader, ...
             max(3, cfg.EMG.RestSeconds), cfg);
         ensureHealthyFrames(restFrames, cfg);
-        for hand = 1:2
+        for hand = activeHands
             gyroBiasDps(hand, :) = median( ...
                 restFrames.gyroDps(:, :, hand), 1);
         end
@@ -64,7 +79,7 @@ function mainMLDataCollection
         cleanupFigure = onCleanup(@()closeFigure(fig));
         activeFrames = emptyFrames;
         activeSampleHands = strings(0, 1);
-        for hand = 1:2
+        for hand = activeHands
             fprintf('\n%s EMG REFERENCE\n', cfg.IMU.HandNames(hand));
             fprintf(['Keep the other arm relaxed. Click START, then make ' ...
                 'comfortable KICK, SNARE and CRASH gestures with the %s ' ...
@@ -93,6 +108,7 @@ function mainMLDataCollection
             cfg.EMG.Hands, MinimumActiveSpanVolts= ...
             cfg.EMG.MinimumActiveSpanVolts, ...
             ActiveSampleHands=activeSampleHands, ...
+            ActiveChannelMask=cfg.EMG.ActiveChannelMask, ...
             RailVolts=cfg.EMG.Quality.RailVolts, ...
             MaximumRailFraction=cfg.EMG.Quality.MaximumRailFraction, ...
             MaximumRestSigmaVolts=cfg.EMG.Quality.RestSigmaWarnVolts, ...
@@ -191,6 +207,7 @@ function metadata = initialMetadata(id, startedAt, cfg, rawFile, ...
     metadata.sessionId = id;
     metadata.startedAt = startedAt;
     metadata.mode = "ml-data-collection";
+    metadata.sensorProfile = cfg.Runtime.SensorProfile;
     metadata.config = cfg;
     metadata.rawDataFile = string(rawFile);
     metadata.emgCalibrationFile = string(calibrationFile);
@@ -554,7 +571,8 @@ function ensureHealthyFrames(frames, cfg)
         error('MyoDrum:InsufficientMLCollectionFrames', ...
             'Too few valid synchronized frames arrived.');
     end
-    if any(mean(frames.frameValid, 1) < 0.99)
+    active = cfg.IMU.ActiveHandIndices;
+    if any(mean(frames.frameValid(:,active), 1) < 0.99)
         error('MyoDrum:MLCollectionIMUReadFailures', ...
             'At least one MPU6050 failed more than 1%% of stream reads.');
     end
@@ -565,18 +583,20 @@ function volts = adcToVolts(adc, cfg)
 end
 
 function printEMGProfile(profile, cfg)
-    disp(table(cfg.EMG.ChannelNames, cfg.EMG.AnalogPins, ...
-        profile.baseline_V', profile.noiseSigma_V', ...
-        profile.activeReference_V', profile.activeSpan_V', ...
-        profile.signalToNoiseRatio', profile.validChannel', ...
-        profile.qualityReason', 'VariableNames', ...
+    active = cfg.EMG.ActiveChannelMask(:);
+    disp(table(cfg.EMG.ChannelNames(active), cfg.EMG.AnalogPins(active), ...
+        profile.baseline_V(active)', profile.noiseSigma_V(active)', ...
+        profile.activeReference_V(active)', profile.activeSpan_V(active)', ...
+        profile.signalToNoiseRatio(active)', profile.validChannel(active)', ...
+        profile.qualityReason(active)', 'VariableNames', ...
         {'Channel','Pin','Rest_V','RestNoise_V','ActiveReference_V', ...
         'Span_V','SignalToNoise','Valid','Reason'}));
 end
 
 function requireSafeEMGProfile(profile, cfg)
-    if all(profile.validChannel), return; end
-    invalid = ~profile.validChannel(:);
+    active = cfg.EMG.ActiveChannelMask(:);
+    if all(profile.validChannel(active)), return; end
+    invalid = active & ~profile.validChannel(:);
     channelNames = cfg.EMG.ChannelNames(:);
     reasons = profile.qualityReason(:);
     details = channelNames(invalid) + " (" + reasons(invalid) + ")";
